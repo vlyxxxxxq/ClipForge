@@ -1,0 +1,7 @@
+node_modules
+dist
+release
+native/bin
+native/AudioCap/bin
+native/AudioCap/obj
+resources/ffmpeg
