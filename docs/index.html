@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClipForge</title>
+<meta name="description" content="Local replay-buffer gameplay clipper and editor for Windows. No account, no cloud.">
+<link rel="icon" href="icon.png">
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --text: #e8eaf0; --muted: #9aa3b2;
+    --accent: #ff5a3c; --accent-ink: #fff;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f7f7f9; --panel: #ffffff; --line: #e2e4ea; --text: #15171c; --muted: #5b6272;
+      --accent: #e0442a; --accent-ink: #fff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 "Segoe UI", system-ui, -apple-system, sans-serif; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 0 16px; }
+  header { padding: 72px 0 48px; text-align: center; }
+  header img { width: 72px; height: 72px; border-radius: 16px; }
+  h1 { font-size: clamp(2.2rem, 6vw, 3.2rem); margin: 16px 0 8px; letter-spacing: -0.02em; }
+  .tag { color: var(--muted); font-size: 1.15rem; max-width: 560px; margin: 0 auto 28px; }
+  .btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn { display: inline-block; padding: 12px 22px; border-radius: 10px; font-weight: 600; text-decoration: none; border: 1px solid var(--line); color: var(--text); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn:hover { filter: brightness(1.08); }
+  .small { color: var(--muted); font-size: 0.9rem; margin-top: 14px; }
+  section { padding: 36px 0; border-top: 1px solid var(--line); }
+  h2 { font-size: 1.4rem; margin: 0 0 18px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+  .card h3 { margin: 0 0 6px; font-size: 1.02rem; }
+  .card p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+  ol, ul { padding-left: 1.3em; margin: 0; }
+  li { margin: 6px 0; }
+  kbd { background: var(--panel); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; font: 0.85em Consolas, monospace; }
+  a { color: var(--accent); }
+  footer { padding: 32px 0 48px; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="icon.png" alt="">
+    <h1>ClipForge</h1>
+    <p class="tag">Capture runs in the background. Press <kbd>F8</kbd> to save the last 15–120 seconds, then trim, reframe and export. All local: no account, no cloud.</p>
+    <div class="btns">
+      <a class="btn primary" href="https://github.com/vlyxxxxxq/ClipForge/releases/latest">Download for Windows</a>
+      <a class="btn" href="https://github.com/vlyxxxxxq/ClipForge">View source</a>
+    </div>
+    <p class="small">Windows 10/11 64-bit · free · portable zip (~280 MB)</p>
+  </header>
+
+  <section>
+    <h2>What it does</h2>
+    <div class="grid">
+      <div class="card"><h3>Replay buffer</h3><p>Always-on capture of your display with a rolling 15–120 s buffer on disk. Hardware encoding (AMD, NVIDIA, Intel) with automatic fallback.</p></div>
+      <div class="card"><h3>Global hotkey</h3><p>Save a clip from inside your game with a configurable hotkey. Keeps recording from the tray when the window is closed.</p></div>
+      <div class="card"><h3>Separate audio tracks</h3><p>Desktop audio and microphone are recorded as separate tracks, so you can balance or mute them later.</p></div>
+      <div class="card"><h3>Library</h3><p>Thumbnails, search, sort, favorites and tags. Clips are plain MP4 files in your Videos folder.</p></div>
+      <div class="card"><h3>Editor</h3><p>Trim, split and cut sections, with undo. Reframe to 16:9, 9:16 or 1:1 with zoom and pan, and add text overlays.</p></div>
+      <div class="card"><h3>Export</h3><p>Frame-accurate H.264/AAC MP4 at original, 1080p or 720p, with progress and cancel.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Install</h2>
+    <ol>
+      <li>Install the <a href="https://dotnet.microsoft.com/download/dotnet/10.0">.NET 10 Desktop Runtime</a> (needed for audio capture).</li>
+      <li>Download the zip from the <a href="https://github.com/vlyxxxxxq/ClipForge/releases/latest">latest release</a> and extract it anywhere.</li>
+      <li>Run <code>ClipForge\ClipForge.exe</code>. The app is unsigned, so Windows may warn the first time: click <b>More info → Run anyway</b>.</li>
+      <li>Press <b>Start capture</b>, play, and press <kbd>F8</kbd> to save.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Good to know</h2>
+    <ul>
+      <li>Captures whole displays, not single windows. Borderless and windowed games work; exclusive fullscreen hasn't been tested and may record black frames.</li>
+      <li>Saved clips can be up to 2 s longer than the chosen length, because they're cut on segment boundaries without re-encoding.</li>
+      <li>ClipForge never deletes your clips on its own. It only cleans up its own temporary files.</li>
+    </ul>
+  </section>
+
+  <footer>
+    ClipForge is built with Electron, React and FFmpeg. The download bundles FFmpeg (gyan.dev build, GPL v3); its license is included in the zip and its source is at <a href="https://github.com/FFmpeg/FFmpeg">github.com/FFmpeg/FFmpeg</a>.
+  </footer>
+</div>
+</body>
+</html>
