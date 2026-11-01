@@ -38,7 +38,7 @@ This produces `release/win-unpacked/ClipForge.exe`, a portable folder (no instal
 
 ## Using it
 
-1. Open ClipForge and press **Start capture** (or enable *Start capture when ClipForge opens* on the Capture page).
+1. Open ClipForge and finish the short setup. From then on the replay buffer is **always on**: ClipForge starts with Windows in the tray and starts capturing by itself. If capture fails it keeps retrying. **Stop** holds until the next start. Turn this off with *Keep the replay buffer on* (Capture page) and *Start ClipForge when you sign in to Windows* (Settings).
 2. Play. The top bar shows the recording state, how full the buffer is and the replay length.
 3. Press **F8** (configurable) to save the last N seconds. A Windows notification confirms the save (and an optional sound), and the clip appears in **Library**. You can also bind separate hotkeys that always save 15, 30, 60, 90 or 120 seconds, and a screenshot hotkey that saves a PNG to `<clips folder>\Screenshots`.
 4. Select a clip to preview it, rename it, tag it, favorite it, reveal it in Explorer or delete it (removing from the library only, or moving the file to the Recycle Bin). Clips are grouped by date. Ctrl+click, Shift+click or Ctrl+A selects several to favorite, tag or delete together. Drag a clip out of the library, or use **Copy file**, to put it into a chat or folder.
@@ -123,6 +123,7 @@ Not yet verified, or known gaps:
 - Save sounds: the audio system was confirmed running, but nobody has listened to them, including while a game has focus or the window is hidden.
 - Press markers are estimates, within about half a second.
 - **Capture interruptions seen in real use:** FFmpeg exited with "Generic error in an external library" three times in about 12 hours of background capture on this PC. Each was followed by an automatic restart, and the last also by a period with no display available. The cause hasn't been confirmed; display sleep, locking or a fullscreen switch would fit. Check `logs\clipforge.log` for how often it happens.
+- Starting with Windows: the startup entry was confirmed in the registry and the app was launched the way Windows launches it, but no real sign-in has been tested.
 - Sleep and resume: capture is set to pause on sleep and resume afterwards, but no real sleep cycle has been tested.
 - Exporting to a second drive: built for it and covered by fake-process tests, but this PC has only one drive.
 - Low disk space: the checks exist (warn below 2 GB, stop below 500 MB, refuse saves/exports without room) but haven't been exercised on a nearly full drive.

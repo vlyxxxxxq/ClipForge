@@ -149,6 +149,28 @@ describe('CaptureService lifecycle', () => {
     expect(restored).toHaveBeenCalledOnce();
   });
 
+  it('keeps trying after giving up, until you stop it', async () => {
+    const stubborn = new CaptureService(path.join(root, 'buffer2'), 'AudioCap.exe', 10, 15);
+    stubborn.configure({ ...defaultSettings(root).capture, clipsDir: path.join(root, 'clips'), desktopAudio: false, encoder: 'libx264' });
+    h.spawnError = new Error('spawn ffmpeg.exe ENOENT');
+    await stubborn.start();
+    await until(() => ffs().length >= 3);
+    expect(stubborn.getStatus().state).not.toBe('recording');
+    await tick(5);
+    h.spawnError = null;
+    const failedSoFar = ffs().length;
+    await until(() => ffs().length > failedSoFar);
+    await tick(5);
+    ffs()[ffs().length - 1].progress();
+    expect(stubborn.getStatus().state).toBe('recording');
+    await stubborn.stop();
+    const count = ffs().length;
+    h.spawnError = new Error('spawn ffmpeg.exe ENOENT');
+    await tick(50);
+    expect(ffs()).toHaveLength(count);
+    expect(stubborn.getStatus().state).toBe('stopped');
+  });
+
   it('a stop ends the wait for a display', async () => {
     h.monitors = async () => [];
     await svc.start();

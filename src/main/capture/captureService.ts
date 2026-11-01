@@ -47,7 +47,7 @@ export class CaptureService extends EventEmitter {
   private saves: SaveCoordinator;
   private status: CaptureStatus;
 
-  constructor(private bufferRoot: string, private audioHelper: string, private sourceRetryMs = 5000) {
+  constructor(private bufferRoot: string, private audioHelper: string, private sourceRetryMs = 5000, private failureRetryMs = 60000) {
     super();
     fs.mkdirSync(bufferRoot, { recursive: true });
     this.status = {
@@ -130,6 +130,7 @@ export class CaptureService extends EventEmitter {
       if (e instanceof Superseded) return; // the command that overtook this start sets the final state
       L.error('start failed: ' + e.message);
       this.update({ state: 'error', lastError: e.message });
+      this.retryAfterFailure(gen);
     }
   }
 
@@ -152,6 +153,18 @@ export class CaptureService extends EventEmitter {
         else this.waitForSource(gen);
       });
     }, this.sourceRetryMs);
+  }
+
+  /** A clip you miss because capture gave up is the worst outcome, so keep trying until you stop it. */
+  private retryAfterFailure(gen: number) {
+    if (gen !== this.generation) return;
+    this.clearSourceTimer();
+    this.sourceTimer = setTimeout(() => {
+      this.sourceTimer = null;
+      this.enqueue(async () => {
+        if (gen === this.generation && this.status.state === 'error') { this.monitors = null; await this.doStart(gen); }
+      });
+    }, this.failureRetryMs);
   }
 
   private clearSourceTimer() { if (this.sourceTimer) clearTimeout(this.sourceTimer); this.sourceTimer = null; }
@@ -244,6 +257,7 @@ export class CaptureService extends EventEmitter {
         return;
       }
       this.update({ state: 'error', lastError: `Capture stopped unexpectedly: ${msg}` });
+      this.retryAfterFailure(gen);
     };
     ff.on('error', (e) => onExit(null, e));
     ff.on('close', (code) => onExit(code));
@@ -299,7 +313,7 @@ export class CaptureService extends EventEmitter {
       try {
         await this.stopProcesses();
         if (gen !== this.generation) return;
-        if (!this.allowRestart()) { this.update({ state: 'error', lastError: `Capture stopped: ${warning}` }); return; }
+        if (!this.allowRestart()) { this.update({ state: 'error', lastError: `Capture stopped: ${warning}` }); this.retryAfterFailure(gen); return; }
         this.update({ state: 'stopped' });
         await this.doStart(gen);
         if (this.isActive) this.update({ warnings: [...this.status.warnings, warning] });

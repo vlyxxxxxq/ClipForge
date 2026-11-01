@@ -134,6 +134,28 @@ describe('library persistence', () => {
 });
 
 describe('settings persistence', () => {
+  it('is always on by default', () => {
+    const s = defaultSettings('C:\\Videos');
+    expect(s.capture.autoStartCapture).toBe(true);
+    expect(s.general.launchAtLogin).toBe(true);
+    expect(s.general.launchMinimized).toBe(true);
+  });
+
+  it('moves an older settings file to always on, then respects turning it off', () => {
+    const d = tmp();
+    const file = path.join(d, 'settings.json');
+    fs.writeFileSync(file, JSON.stringify({ capture: { autoStartCapture: false, hotkey: 'F9' }, general: { launchMinimized: false } }));
+    const old = new SettingsStore(file, defaultSettings('C:\\Videos'));
+    expect(old.get().capture.autoStartCapture).toBe(true);
+    expect(old.get().general.launchAtLogin).toBe(true);
+    expect(old.get().capture.hotkey).toBe('F9'); // other choices are kept
+    const cur = old.get();
+    old.set({ ...cur, capture: { ...cur.capture, autoStartCapture: false }, general: { ...cur.general, launchAtLogin: false } });
+    const again = new SettingsStore(file, defaultSettings('C:\\Videos')).get();
+    expect(again.capture.autoStartCapture).toBe(false);
+    expect(again.general.launchAtLogin).toBe(false);
+  });
+
   it('uses defaults and says so when the file is damaged', () => {
     const d = tmp();
     const file = path.join(d, 'settings.json');

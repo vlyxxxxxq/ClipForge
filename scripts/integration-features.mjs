@@ -30,7 +30,7 @@ fs.writeFileSync(path.join(profile, 'library.json'), JSON.stringify({ version: 1
   record('b', 'Clip yesterday', makeClip('b.mp4', 12), daysAgo(1)),
   record('c', 'Clip older', makeClip('c.mp4', 12), daysAgo(45)),
 ] }));
-const baseSettings = { capture: { clipsDir, replayDuration: 60 }, general: {} };
+const baseSettings = { capture: { clipsDir, replayDuration: 60, autoStartCapture: false }, general: { defaultsVersion: 2 } };
 fs.writeFileSync(path.join(profile, 'settings.json'), JSON.stringify(baseSettings));
 
 const proc = spawn(path.resolve('node_modules/electron/dist/electron.exe'), ['.', `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`], { stdio: 'ignore' });

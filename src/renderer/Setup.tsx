@@ -5,7 +5,7 @@ import { Modal } from './Modal';
 import type { Toast } from './App';
 import type { AudioDevice, CaptureSettings, CaptureStatus, GeneralSettings, MonitorInfo, Settings } from '../shared/types';
 
-/** First-run setup. Skippable, and it never starts recording until you press Start capture. */
+/** First-run setup. Skippable. Recording starts when it's finished, or from Start capture on the test step. */
 export function Setup({ settings, status, onSettings, onDone, toast }: {
   settings: Settings; status: CaptureStatus | null; onSettings: (s: Settings) => Promise<unknown>; onDone: () => void; toast: (k: Toast['kind'], t: string) => void;
 }) {
@@ -52,6 +52,8 @@ export function Setup({ settings, status, onSettings, onDone, toast }: {
           <Field label="Clips folder">
             <div className="row"><input readOnly value={c.clipsDir} aria-label="Clips folder" /><button className="btn" onClick={async () => { const f = await api.pickFolder(); if (f) setC({ clipsDir: f }); }}>Browse…</button></div>
           </Field>
+          <Field label="Keep the replay buffer on" hint="Your screen is recorded to a temporary buffer on this PC whenever ClipForge runs, so you never miss a clip. Nothing is uploaded."><input type="checkbox" checked={c.autoStartCapture} onChange={(e) => setC({ autoStartCapture: e.target.checked })} /></Field>
+          <Field label="Start with Windows" hint="Runs in the tray from when you sign in."><input type="checkbox" checked={settings.general.launchAtLogin} onChange={(e) => setG({ launchAtLogin: e.target.checked })} /></Field>
           <Field label="Play a sound when a clip saves" hint="So you know it worked without leaving your game."><input type="checkbox" checked={settings.general.saveSound} onChange={(e) => setG({ saveSound: e.target.checked })} /></Field>
         </div>
       ) : (

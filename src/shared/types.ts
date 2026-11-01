@@ -32,6 +32,8 @@ export interface GeneralSettings {
   launchMinimized: boolean;
   saveSound: boolean;
   setupDone: boolean; // the first-run setup has been finished or skipped
+  launchAtLogin: boolean; // start with Windows, in the tray
+  defaultsVersion: number; // lets older settings files pick up changed defaults once
 }
 
 export interface Settings {

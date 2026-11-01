@@ -59,7 +59,7 @@ export function CapturePage({ settings, status, onSettings, toast }: { settings:
         <Field label="Clips folder">
           <div className="row"><input readOnly value={c.clipsDir} /><button className="btn" onClick={async () => { const f = await api.pickFolder(); if (f) set({ clipsDir: f }); }}>Browse…</button></div>
         </Field>
-        <Field label="Start capture when ClipForge opens"><input type="checkbox" checked={c.autoStartCapture} onChange={(e) => set({ autoStartCapture: e.target.checked })} /></Field>
+        <Field label="Keep the replay buffer on" hint="Starts whenever ClipForge opens, so you don't have to remember. Stop still works until the next start."><input type="checkbox" checked={c.autoStartCapture} onChange={(e) => set({ autoStartCapture: e.target.checked })} /></Field>
       </section>
       <section className="card-section">
         <h2>Video <button className="btn small" disabled={loading} onClick={() => load(true)}>{loading ? 'Detecting…' : 'Re-detect'}</button></h2>

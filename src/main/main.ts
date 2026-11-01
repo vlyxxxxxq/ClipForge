@@ -84,7 +84,10 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, '../preload/preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   win.loadFile(path.join(__dirname, '../../renderer/index.html'));
-  win.once('ready-to-show', () => { if (!(settings.get().general.launchMinimized && process.argv.includes('--hidden'))) win?.show(); });
+  win.once('ready-to-show', () => {
+    const g = settings.get().general;
+    if (!(g.launchMinimized && process.argv.includes('--hidden') && g.setupDone)) win?.show(); // setup needs to be seen
+  });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   win.on('close', (e) => {
@@ -122,6 +125,13 @@ function registerHotkeys(): { ok: boolean; error: string | null } {
 function runHotkey(action: HotkeyAction) {
   if (action.type === 'save') saveClip(action.duration ?? undefined);
   else screenshot();
+}
+
+// Windows startup entry. Waits for the first-run setup, where it can be turned off, and only applies to the installed app.
+function applyLoginItem() {
+  if (!app.isPackaged) return;
+  const g = settings.get().general;
+  app.setLoginItemSettings({ openAtLogin: g.launchAtLogin && g.setupDone, args: ['--hidden'] });
 }
 
 // ---- capture restarts ---------------------------------------------------------------------
@@ -285,6 +295,9 @@ function registerIpc() {
     if (keys(s.capture) !== keys(prev.capture)) hotkey = registerHotkeys();
     const restartKeys = (c: typeof s.capture) => JSON.stringify({ ...c, hotkey: 0, durationHotkeys: 0, screenshotHotkey: 0, replayDuration: 0, clipsDir: 0, autoStartCapture: 0 });
     const restartNeeded = restartKeys(prev.capture) !== restartKeys(s.capture);
+    applyLoginItem();
+    // Finishing setup, or turning always-on back on, starts the replay buffer right away.
+    if (s.general.setupDone && s.capture.autoStartCapture && (!prev.general.setupDone || !prev.capture.autoStartCapture) && !mediaError) capture.start();
     if (restartNeeded) scheduleCaptureRestart();
     return { settings: s, hotkey };
   });
@@ -405,10 +418,12 @@ app.whenReady().then(async () => {
   // Capture ending by itself must never go unnoticed: you'd keep playing, believing you're recording.
   const captureAlert = (title: string, body: string) => { if (Notification.isSupported()) new Notification({ title, body, silent: true }).show(); };
   let lastState: CaptureStatus['state'] = 'stopped';
+  let lastFailureAlert = 0; // capture keeps retrying after a failure; don't repeat the alert every time
   capture.on('status', (st: CaptureStatus) => {
     send('capture-status', st);
     updateTray(st);
-    if (st.state === 'error' && lastState !== 'error') {
+    if (st.state === 'error' && lastState !== 'error' && Date.now() - lastFailureAlert > 600000) {
+      lastFailureAlert = Date.now();
       captureAlert('Capture stopped', st.lastError ?? 'Capture stopped unexpectedly.');
       send('event', { type: 'capture-interrupted', payload: st.lastError });
     }
@@ -433,7 +448,8 @@ app.whenReady().then(async () => {
   updateTray(capture.getStatus());
   createWindow();
   library.verifyAll();
-  if (!mediaError && settings.get().capture.autoStartCapture) capture.start();
+  applyLoginItem();
+  if (!mediaError && settings.get().capture.autoStartCapture && settings.get().general.setupDone) capture.start();
 });
 
 app.on('window-all-closed', () => { /* keep running in the tray */ });

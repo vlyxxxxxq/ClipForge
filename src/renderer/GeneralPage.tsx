@@ -15,7 +15,8 @@ export function GeneralPage({ settings, onSettings }: { settings: Settings; onSe
       <section className="card-section">
         <h2>Window</h2>
         <Field label="Closing the window keeps ClipForge running in the tray" hint="Capture continues in the background. Quit from the tray menu."><input type="checkbox" checked={g.closeToTray} onChange={(e) => set({ closeToTray: e.target.checked })} /></Field>
-        <Field label="Start hidden when launched with --hidden"><input type="checkbox" checked={g.launchMinimized} onChange={(e) => set({ launchMinimized: e.target.checked })} /></Field>
+        <Field label="Start ClipForge when you sign in to Windows" hint="With the replay buffer on, you're recording from the moment Windows starts."><input type="checkbox" checked={g.launchAtLogin} onChange={(e) => set({ launchAtLogin: e.target.checked })} /></Field>
+        <Field label="Start in the tray when Windows starts"><input type="checkbox" checked={g.launchMinimized} onChange={(e) => set({ launchMinimized: e.target.checked })} /></Field>
       </section>
       <section className="card-section">
         <h2>Notifications</h2>

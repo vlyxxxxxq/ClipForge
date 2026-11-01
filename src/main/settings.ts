@@ -2,14 +2,16 @@ import path from 'node:path';
 import { loadDocument, writeJsonWithBackup } from './util';
 import { REPLAY_DURATIONS, Settings } from '../shared/types';
 
+const DEFAULTS_VERSION = 2; // 2: the replay buffer is always on and ClipForge starts with Windows
+
 export function defaultSettings(videosDir: string): Settings {
   return {
     capture: {
       replayDuration: 60, hotkey: 'F8', durationHotkeys: {}, screenshotHotkey: null, monitorIndex: 0, resolution: '1080p', fps: 60, quality: 'high', encoder: 'auto',
       desktopAudio: true, desktopDeviceId: null, micEnabled: false, micDeviceId: null, desktopVolume: 1, micVolume: 1,
-      clipsDir: path.join(videosDir, 'ClipForge'), autoStartCapture: false,
+      clipsDir: path.join(videosDir, 'ClipForge'), autoStartCapture: true,
     },
-    general: { closeToTray: true, notifyOnSave: true, launchMinimized: false, saveSound: false, setupDone: false },
+    general: { closeToTray: true, notifyOnSave: true, launchMinimized: true, saveSound: false, setupDone: false, launchAtLogin: true, defaultsVersion: DEFAULTS_VERSION },
   };
 }
 
@@ -23,6 +25,8 @@ const isAccel = (v: unknown): v is string => typeof v === 'string' && /^[\w+]{1,
 export function sanitizeSettings(input: any, d: Settings): Settings {
   const c = input?.capture ?? {}, g = input?.general ?? {};
   const dc = d.capture;
+  // Older files recorded the old off-by-default values. Move them to always-on once; after that, a choice to turn it off sticks.
+  const upgrading = typeof g.defaultsVersion !== 'number' || g.defaultsVersion < DEFAULTS_VERSION;
   return {
     capture: {
       replayDuration: oneOf(c.replayDuration, REPLAY_DURATIONS, dc.replayDuration),
@@ -41,14 +45,16 @@ export function sanitizeSettings(input: any, d: Settings): Settings {
       desktopVolume: num(c.desktopVolume, 0, 2, 1),
       micVolume: num(c.micVolume, 0, 2, 1),
       clipsDir: typeof c.clipsDir === 'string' && path.isAbsolute(c.clipsDir) ? c.clipsDir : dc.clipsDir,
-      autoStartCapture: bool(c.autoStartCapture, dc.autoStartCapture),
+      autoStartCapture: upgrading ? dc.autoStartCapture : bool(c.autoStartCapture, dc.autoStartCapture),
     },
     general: {
       closeToTray: bool(g.closeToTray, d.general.closeToTray),
       notifyOnSave: bool(g.notifyOnSave, d.general.notifyOnSave),
-      launchMinimized: bool(g.launchMinimized, d.general.launchMinimized),
+      launchMinimized: upgrading ? d.general.launchMinimized : bool(g.launchMinimized, d.general.launchMinimized),
       saveSound: bool(g.saveSound, d.general.saveSound),
       setupDone: bool(g.setupDone, d.general.setupDone),
+      launchAtLogin: upgrading ? d.general.launchAtLogin : bool(g.launchAtLogin, d.general.launchAtLogin),
+      defaultsVersion: DEFAULTS_VERSION,
     },
   };
 }
