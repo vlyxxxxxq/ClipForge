@@ -129,9 +129,9 @@ function runHotkey(action: HotkeyAction) {
 
 // Windows startup entry. Waits for the first-run setup, where it can be turned off, and only applies to the installed app.
 function applyLoginItem() {
-  if (!app.isPackaged) return;
+  if (!app.isPackaged || process.env.CLIPFORGE_NO_LOGIN_ITEM) return; // test runs must never touch the real startup list
   const g = settings.get().general;
-  app.setLoginItemSettings({ openAtLogin: g.launchAtLogin && g.setupDone, args: ['--hidden'] });
+  app.setLoginItemSettings({ name: 'ClipForge', openAtLogin: g.launchAtLogin && g.setupDone, args: ['--hidden'] });
 }
 
 // ---- capture restarts ---------------------------------------------------------------------
