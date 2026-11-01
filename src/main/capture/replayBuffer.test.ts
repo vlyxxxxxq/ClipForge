@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import path from 'node:path';
 import { concatScript, ReplayBuffer } from './replayBuffer';
-import { buildCaptureArgs, buildSaveArgs, targetSize } from './captureArgs';
+import { buildCaptureArgs, buildSaveArgs, buildScreenshotArgs, targetSize } from './captureArgs';
 import { defaultSettings } from '../settings';
 
 const seg = (session: number, i: number, len = 2) => ({ session, file: `/b/s${session}/seg_${i}.ts`, start: i * len, end: (i + 1) * len });
@@ -112,5 +112,13 @@ describe('capture args', () => {
   it('save args remux without re-encoding into faststart MP4', () => {
     const a = buildSaveArgs('/l.ffconcat', '/o.mp4', ['Desktop']);
     expect(a).toEqual(expect.arrayContaining(['-c', 'copy', '+faststart', 'title=Desktop']));
+  });
+});
+
+describe('buildScreenshotArgs', () => {
+  it('captures one frame of the chosen display', () => {
+    const a = buildScreenshotArgs(2, 'C:/out.png');
+    expect(a[a.indexOf('-i') + 1]).toContain('output_idx=2');
+    expect(a.slice(-3)).toEqual(['-frames:v', '1', 'C:/out.png']);
   });
 });

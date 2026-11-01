@@ -3,12 +3,12 @@ import { api, fmtTime } from './api';
 import { createDebouncedSaver } from './debouncedSaver';
 import type { Toast } from './App';
 import {
-  AspectMode, canvasSize, clamp, cropRect, EditProject, newId, outputDuration, outputToSource, removeSegment, setTrimEnd, setTrimStart,
-  sourceToOutput, splitAt, TextOverlay,
+  AspectMode, canvasSize, clamp, cropRect, EditProject, markerTimes, newId, outputDuration, outputToSource, removeSegment, setTrimEnd, setTrimStart,
+  sourceToOutput, splitAt, TextOverlay, toggleMarker,
 } from '../shared/project';
 import type { ExportJob, ExportOptions } from '../shared/types';
 
-interface Loaded { fps: number; filmstrip: string | null; audio: (string | null)[]; videoUrl: string }
+interface Loaded { pressMarker: number | null; fps: number; filmstrip: string | null; audio: (string | null)[]; videoUrl: string }
 
 /** Undo/redo history. Rapid changes (slider drags) within 600 ms coalesce into one step. */
 function useHistory(initial: EditProject | null) {
@@ -57,7 +57,7 @@ export function Editor({ clipId, toast, onBack }: { clipId: string | null; toast
       if (!current) return;
       h.reset(r.project);
       r.notices.forEach((n) => toast('error', n));
-      setLoaded({ fps: r.fps, filmstrip: r.filmstrip, audio: r.audio, videoUrl: r.videoUrl });
+      setLoaded({ pressMarker: r.pressMarker, fps: r.fps, filmstrip: r.filmstrip, audio: r.audio, videoUrl: r.videoUrl });
       setOpts((o) => ({ ...o, fileName: `${r.project.source.path.split(/[\\/]/).pop()!.replace(/\.\w+$/, '')} edit` }));
       setT(0); tRef.current = 0;
     }).catch((e) => { if (current) setError(e.message); });
@@ -175,6 +175,12 @@ export function Editor({ clipId, toast, onBack }: { clipId: string | null; toast
       else if (e.key === 'ArrowRight') { e.preventDefault(); seek(tRef.current + (e.shiftKey ? 1 : frame)); }
       else if (e.key.toLowerCase() === 'i') { h.set(setTrimStart(pr, outputToSource(pr, tRef.current).time)); seek(0); }
       else if (e.key.toLowerCase() === 'o') h.set(setTrimEnd(pr, outputToSource(pr, tRef.current).time));
+      else if (e.key.toLowerCase() === 'm') h.set(toggleMarker(pr, outputToSource(pr, tRef.current).time));
+      else if (e.key === ',' || e.key === '.') {
+        const times = markerTimes(pr, loaded?.pressMarker ?? null).map((m) => m.time);
+        const next = e.key === ',' ? times.filter((x) => x < tRef.current - 0.05).pop() : times.find((x) => x > tRef.current + 0.05);
+        if (next !== undefined) seek(next);
+      }
       else if (e.key === 'Home') seek(0);
       else if (e.key === 'End') seek(outputDuration(pr));
     };
@@ -212,15 +218,16 @@ export function Editor({ clipId, toast, onBack }: { clipId: string | null; toast
           <button className="btn" disabled={!selSeg || p.segments.length < 2} onClick={() => { if (selSeg) { h.set(removeSegment(p, selSeg)); setSelSeg(null); } }} title="Remove selected section (Delete)">Remove section</button>
           <button className="btn" onClick={() => h.set(setTrimStart(p, outputToSource(p, t).time))} title="Trim start to playhead (I)">Trim start</button>
           <button className="btn" onClick={() => h.set(setTrimEnd(p, outputToSource(p, t).time))} title="Trim end to playhead (O)">Trim end</button>
+          <button className="btn" onClick={() => h.set(toggleMarker(p, outputToSource(p, t).time))} title="Add or remove a marker at the playhead (M)">Marker</button>
           <button className="btn" onClick={() => { const id = newId('t'); h.set({ ...p, texts: [...p.texts, { id, text: 'Your text', x: 0.5, y: 0.15, size: 0.07, color: '#ffffff', start: t, end: Math.min(duration, t + 3) }] }); setSelText(id); }}>Add text</button>
           <button className="btn icon" disabled={!h.canUndo} onClick={h.undo} aria-label="Undo" title="Undo (Ctrl+Z)">↶</button>
           <button className="btn icon" disabled={!h.canRedo} onClick={h.redo} aria-label="Redo" title="Redo (Ctrl+Y)">↷</button>
         </div>
-        <Timeline p={p} t={t} filmstrip={loaded.filmstrip} selSeg={selSeg} selText={selText} onSeek={(x) => { pause(); seek(x); }}
+        <Timeline p={p} t={t} pressMarker={loaded.pressMarker} filmstrip={loaded.filmstrip} selSeg={selSeg} selText={selText} onSeek={(x) => { pause(); seek(x); }}
           onSelectSeg={(id) => { setSelSeg(id); setSelText(null); }} onSelectText={(id) => { setSelText(id); setSelSeg(null); }}
           onTrim={(edge, src) => h.set(edge === 'start' ? setTrimStart(p, src) : setTrimEnd(p, src), true)}
           onTextTime={(id, start, end) => setText(id, { start, end })} />
-        <p className="hint">Space play/pause · S split · Delete remove · I/O trim to playhead · ←/→ frame step (Shift: 1s) · Ctrl+Z/Y undo/redo · drag the preview to reposition</p>
+        <p className="hint">Space play/pause · S split · Delete remove · I/O trim to playhead · M marker · ,/. previous/next marker · ←/→ frame step (Shift: 1s) · Ctrl+Z/Y undo/redo · drag the preview to reposition</p>
       </div>
       <aside className="inspector">
         <section>
@@ -372,8 +379,8 @@ function Preview({ p, t, videoUrl, videoRef, selText, onSelectText, onPan, onMov
   );
 }
 
-function Timeline({ p, t, filmstrip, selSeg, selText, onSeek, onSelectSeg, onSelectText, onTrim, onTextTime }: {
-  p: EditProject; t: number; filmstrip: string | null; selSeg: string | null; selText: string | null; onSeek: (t: number) => void;
+function Timeline({ p, t, pressMarker, filmstrip, selSeg, selText, onSeek, onSelectSeg, onSelectText, onTrim, onTextTime }: {
+  p: EditProject; t: number; pressMarker: number | null; filmstrip: string | null; selSeg: string | null; selText: string | null; onSeek: (t: number) => void;
   onSelectSeg: (id: string) => void; onSelectText: (id: string) => void; onTrim: (edge: 'start' | 'end', src: number) => void;
   onTextTime: (id: string, start: number, end: number) => void;
 }) {
@@ -416,6 +423,9 @@ function Timeline({ p, t, filmstrip, selSeg, selText, onSeek, onSelectSeg, onSel
             </div>
           );
         })}
+        {markerTimes(p, pressMarker).map((m, i) => (
+          <div key={i} className={`marker ${m.press ? 'press' : ''}`} style={{ left: pct(m.time) }} title={m.press ? 'About where you pressed the hotkey' : 'Marker'} />
+        ))}
         <div className="playhead" style={{ left: pct(t) }} />
       </div>
       <div className="text-lane">

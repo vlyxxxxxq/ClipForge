@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canvasSize, createProject, cropRect, outputDuration, outputToSource, removeSegment, setTrimEnd, setTrimStart, sourceToOutput, splitAt, validateProject } from './project';
+import { canvasSize, createProject, cropRect, outputDuration, outputToSource, removeSegment, setTrimEnd, setTrimStart, sourceToOutput, splitAt, markerTimes, toggleMarker, validateProject } from './project';
 
 const src = { path: 'C:/c.mp4', duration: 30, width: 1920, height: 1080, audioTracks: ['Desktop', 'Microphone'] };
 const base = () => createProject('c1', src);
@@ -83,4 +83,22 @@ describe('validateProject', () => {
     ['missing source size', { source: { path: 'x' } }],
     ['null text', { texts: [null] }],
   ])('rejects %s without throwing', (_name, patch) => { expect(validateProject({ ...good(), ...patch })).toBe(false); });
+});
+
+describe('markers', () => {
+  it('toggles a marker on and off', () => {
+    const on = toggleMarker(base(), 5);
+    expect(on.markers).toEqual([5]);
+    expect(toggleMarker(on, 5.1).markers).toEqual([]);
+    expect(toggleMarker(on, 2).markers).toEqual([2, 5]);
+  });
+
+  it('follows the edit and drops markers in removed sections', () => {
+    let p = toggleMarker(toggleMarker(base(), 12), 22);
+    p = splitAt(splitAt(p, 10), 20);
+    p = removeSegment(p, p.segments[1].id); // removes 10..20
+    expect(markerTimes(p, 5)).toEqual([{ time: 5, press: true }, { time: 12, press: false }]);
+    expect(validateProject(p)).toBe(true);
+    expect(validateProject({ ...p, markers: [NaN] })).toBe(false);
+  });
 });

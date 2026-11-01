@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { initLogger, log, logFilePath } from './logger';
-import { initMedia, probe, makeThumbnail, makeFilmstrip, extractAudioTrack } from './media';
+import { initMedia, probe, makeThumbnail, makeFilmstrip, extractAudioTrack, takeScreenshot } from './media';
 import { CaptureService } from './capture/captureService';
 import { LibraryStore } from './library/libraryStore';
 import { ExportService } from './export/exportService';
@@ -60,6 +60,7 @@ function updateTray(st: CaptureStatus) {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label, enabled: false },
     { label: `Save clip (${st.hotkey})`, enabled: st.state === 'recording' || st.state === 'paused', click: () => saveClip() },
+    { label: 'Take screenshot', click: () => screenshot() },
     { type: 'separator' },
     st.state === 'recording' ? { label: 'Pause capture', click: () => capture.pause() }
       : st.state === 'paused' ? { label: 'Resume capture', click: () => capture.resume() }
@@ -120,6 +121,7 @@ function registerHotkeys(): { ok: boolean; error: string | null } {
 
 function runHotkey(action: HotkeyAction) {
   if (action.type === 'save') saveClip(action.duration ?? undefined);
+  else screenshot();
 }
 
 // ---- capture restarts ---------------------------------------------------------------------
@@ -136,17 +138,34 @@ function scheduleCaptureRestart() {
 
 // ---- clips --------------------------------------------------------------------------------
 
-function clipName(ext: string) {
+function timestampName() {
   const d = new Date(), p = (n: number) => String(n).padStart(2, '0');
-  const base = `ClipForge ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`;
-  return uniquePath(settings.get().capture.clipsDir, base, ext);
+  return `ClipForge ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`;
+}
+
+function clipName(ext: string) { return uniquePath(settings.get().capture.clipsDir, timestampName(), ext); }
+
+async function screenshot() {
+  const dir = path.join(settings.get().capture.clipsDir, 'Screenshots');
+  try {
+    const file = uniquePath(dir, timestampName(), '.png');
+    await takeScreenshot(settings.get().capture.monitorIndex, file);
+    L.info(`screenshot saved: ${path.basename(file)}`);
+    send('event', { type: 'screenshot-saved', payload: file });
+    if (settings.get().general.notifyOnSave && Notification.isSupported())
+      new Notification({ title: 'Screenshot saved', body: path.basename(file), silent: true }).show();
+  } catch (e: any) {
+    L.error('screenshot failed: ' + e.message);
+    send('event', { type: 'screenshot-failed', payload: e.message });
+    if (Notification.isSupported()) new Notification({ title: 'Screenshot not saved', body: e.message, silent: true }).show();
+  }
 }
 
 async function saveClip(duration?: number) {
   try {
     const saved = await capture.requestSave(clipName, duration);
     if (!saved) return; // repeated press ignored
-    const rec = await library.addFile(saved.file, 'capture', { durationSec: saved.durationSec, audioTracks: saved.audioTracks });
+    const rec = await library.addFile(saved.file, 'capture', { durationSec: saved.durationSec, audioTracks: saved.audioTracks, pressMarkerSec: saved.pressSec });
     send('event', { type: 'clip-saved', payload: rec });
     if (settings.get().general.notifyOnSave && Notification.isSupported())
       new Notification({ title: 'Clip saved', body: `${Math.round(saved.durationSec)}s · ${path.basename(saved.file)}`, silent: true }).show();
@@ -198,7 +217,7 @@ async function loadProject(clipId: string) {
     if (!ok) notices.push(`Preview audio for "${info.audioTracks[k]}" isn't available. It will still be included in exports.`);
   }
   if (info.audioTracks.length > 2) notices.push(`This clip has ${info.audioTracks.length} audio tracks. Only the first two can be mixed and exported.`);
-  return { project, fps: info.fps, filmstrip: fs.existsSync(strip) ? mediaUrl(strip) : null, audio, videoUrl: mediaUrl(clip.filePath), notices };
+  return { project, pressMarker: clip.pressMarkerSec ?? null, fps: info.fps, filmstrip: fs.existsSync(strip) ? mediaUrl(strip) : null, audio, videoUrl: mediaUrl(clip.filePath), notices };
 }
 
 // ---- media protocol: serves only library media and app caches, with Range support ---------------
@@ -258,6 +277,7 @@ function registerIpc() {
   h('capture:pause', () => capture.pause());
   h('capture:resume', () => capture.resume());
   h('capture:save', () => saveClip());
+  h('capture:screenshot', () => screenshot());
   h('capture:devices', async (refresh?: boolean) => ({
     monitors: await capture.getMonitors(!!refresh),
     audio: await capture.listAudioDevices().catch((e) => { L.warn(e.message); return []; }),
@@ -342,7 +362,8 @@ app.whenReady().then(async () => {
   capture.configure(settings.get().capture);
   library = new LibraryStore(userData, paths.thumbs, { probe, thumbnail: makeThumbnail });
   exporter = new ExportService(paths.exportTmp);
-  exporter.cleanupOrphans([settings.get().capture.clipsDir, path.join(settings.get().capture.clipsDir, 'Exports')]);
+  const clipsDir = settings.get().capture.clipsDir;
+  exporter.cleanupOrphans([clipsDir, path.join(clipsDir, 'Exports'), path.join(clipsDir, 'Screenshots')]);
   library.on('changed', () => send('event', { type: 'library-changed', payload: null }));
   library.on('save-failed', (msg: string) => send('event', { type: 'library-save-failed', payload: msg }));
   capture.on('status', (st: CaptureStatus) => { send('capture-status', st); updateTray(st); });

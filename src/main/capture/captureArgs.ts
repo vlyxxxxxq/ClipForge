@@ -84,3 +84,8 @@ export function buildSaveArgs(concatFile: string, outFile: string, titles: strin
   args.push('-avoid_negative_ts', 'make_zero', '-movflags', '+faststart', '-f', 'mp4', outFile);
   return args;
 }
+
+/** Grab one frame of a display as an image. A second Desktop Duplication session can run beside capture. */
+export function buildScreenshotArgs(monitorIndex: number, outFile: string): string[] {
+  return ['-hide_banner', '-v', 'error', '-y', '-f', 'lavfi', '-i', `ddagrab=output_idx=${monitorIndex}:framerate=30:draw_mouse=1,hwdownload,format=bgra`, '-frames:v', '1', outFile];
+}

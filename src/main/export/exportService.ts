@@ -17,7 +17,7 @@ const FONT = 'C:\\Windows\\Fonts\\segoeuib.ttf';
 const MAX_QUEUED = 8;
 const SHUTDOWN_WAIT_MS = 5000;
 /** Only these exact generated names are ever removed from a user-visible folder. */
-const STAGING_NAME = /^\.clipforge-(export-[0-9a-f-]{36}|tmp-\d+)\.mp4$/;
+const STAGING_NAME = /^\.clipforge-(export-[0-9a-f-]{36}\.mp4|tmp-\d+\.(mp4|png))$/;
 
 interface Entry {
   job: ExportJob;

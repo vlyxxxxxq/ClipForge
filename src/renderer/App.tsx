@@ -39,6 +39,8 @@ export function App() {
       if (cue && soundOn.current) playCue(cue);
       if (e.type === 'clip-saved') toast('ok', `Clip saved (${Math.round((e.payload as any).durationSec)}s)`);
       if (e.type === 'clip-save-failed') toast('error', `Clip not saved: ${e.payload}`);
+      if (e.type === 'screenshot-saved') toast('ok', 'Screenshot saved to the Screenshots folder');
+      if (e.type === 'screenshot-failed') toast('error', `Screenshot not saved: ${e.payload}`);
       if (e.type === 'library-save-failed') toast('error', `Library changes couldn't be saved yet, still trying: ${e.payload}`);
     });
     return () => { offS(); offE(); };

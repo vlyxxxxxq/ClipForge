@@ -1,6 +1,7 @@
 // FFmpeg/ffprobe discovery and media inspection helpers.
 import fs from 'node:fs';
 import path from 'node:path';
+import { buildScreenshotArgs } from './capture/captureArgs';
 import { run } from './util';
 import { log } from './logger';
 import type { EncoderInfo, MonitorInfo } from '../shared/types';
@@ -114,4 +115,19 @@ export async function extractAudioTrack(src: string, index: number, dest: string
   const r = await run(ffmpegPath, ['-hide_banner', '-v', 'error', '-y', '-i', src, '-map', `0:a:${index}`, '-c', 'copy', '-f', 'mp4', tmp], { timeoutMs: 120000 });
   if (r.code !== 0) throw new Error(r.stderr.trim() || 'audio extract failed');
   fs.renameSync(tmp, dest);
+}
+
+/** Save one real frame of a display, published only once it has been read back as a valid image. */
+export async function takeScreenshot(monitorIndex: number, dest: string): Promise<{ width: number; height: number }> {
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  const tmp = path.join(path.dirname(dest), `.clipforge-tmp-${Date.now()}.png`);
+  try {
+    const r = await run(ffmpegPath, buildScreenshotArgs(monitorIndex, tmp), { timeoutMs: 15000 });
+    if (r.code !== 0 || !fs.existsSync(tmp)) throw new Error(r.stderr.trim().split('\n').pop() || 'The display could not be captured.');
+    const info = await probe(tmp);
+    fs.renameSync(tmp, dest);
+    return { width: info.width, height: info.height };
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
 }

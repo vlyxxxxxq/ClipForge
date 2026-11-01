@@ -18,6 +18,7 @@ export interface AudioMix { desktopVolume: number; desktopMuted: boolean; micVol
 
 export interface EditProject {
   version: 1;
+  markers?: number[]; // source seconds, added by the user; absent in older projects
   clipId: string;
   source: { path: string; duration: number; width: number; height: number; audioTracks: string[] };
   segments: Segment[];
@@ -155,5 +156,27 @@ export function validateProject(p: unknown): p is EditProject {
     typeof q.source?.path === 'string' && finite(q.source.duration, q.source.width, q.source.height) &&
     finite(q.framing?.zoom, q.framing?.offsetX, q.framing?.offsetY) &&
     finite(q.audio?.desktopVolume, q.audio?.micVolume) &&
-    Array.isArray(q.texts) && q.texts.every((t) => !!t && typeof t.text === 'string');
+    Array.isArray(q.texts) && q.texts.every((t) => !!t && typeof t.text === 'string') &&
+    (q.markers === undefined || (Array.isArray(q.markers) && q.markers.every((m) => Number.isFinite(m))));
+}
+
+const MARKER_MERGE_SEC = 0.25;
+
+/** Add a marker at this source time, or remove the one already there. */
+export function toggleMarker(p: EditProject, sourceTime: number): EditProject {
+  const markers = p.markers ?? [];
+  const near = markers.filter((m) => Math.abs(m - sourceTime) < MARKER_MERGE_SEC);
+  const next = near.length ? markers.filter((m) => !near.includes(m)) : [...markers, sourceTime].sort((a, b) => a - b);
+  return { ...p, markers: next };
+}
+
+/** Where markers fall on the output timeline, in order. Markers inside removed sections are skipped. */
+export function markerTimes(p: EditProject, pressMarker: number | null): { time: number; press: boolean }[] {
+  const all = [...(p.markers ?? []).map((m) => ({ src: m, press: false })), ...(pressMarker === null ? [] : [{ src: pressMarker, press: true }])];
+  const out: { time: number; press: boolean }[] = [];
+  for (const m of all) {
+    const time = sourceToOutput(p, m.src);
+    if (time !== null) out.push({ time, press: m.press });
+  }
+  return out.sort((a, b) => a.time - b.time);
 }

@@ -82,6 +82,7 @@ export interface ClipRecord {
   status: 'ok' | 'missing' | 'corrupt' | 'pending';
   kind: 'capture' | 'export' | 'import';
   sourceClipId?: string;
+  pressMarkerSec?: number; // roughly where in the clip the save hotkey was pressed
 }
 
 export interface ExportOptions {

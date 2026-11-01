@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, ClipView, fmtBytes, fmtDuration } from './api';
 import type { Toast } from './App';
 import type { CaptureStatus, RecoveryInfo } from '../shared/types';
@@ -133,10 +133,11 @@ function ClipDetails({ clip, onEdit, onPatch, onDelete }: { clip: ClipView; onEd
   const [tag, setTag] = useState('');
   useEffect(() => setTitle(clip.title), [clip.title]);
   const commitTitle = () => { const t = title.trim(); if (t && t !== clip.title) onPatch({ title: t }); else setTitle(clip.title); };
+  const video = useRef<HTMLVideoElement>(null);
   const addTag = () => { const t = tag.trim(); if (t && !clip.tags.includes(t)) onPatch({ tags: [...clip.tags, t] }); setTag(''); };
   return (
     <div className="details">
-      {clip.status === 'ok' ? <video className="preview-video" src={clip.videoUrl} controls preload="metadata" />
+      {clip.status === 'ok' ? <video ref={video} className="preview-video" src={clip.videoUrl} controls preload="metadata" />
         : <div className="preview-video ph">{clip.status === 'missing' ? 'The file was moved or deleted.' : clip.status === 'corrupt' ? 'This file could not be read.' : 'Processing…'}</div>}
       <label className="field">
         <span>Title</span>
@@ -145,6 +146,7 @@ function ClipDetails({ clip, onEdit, onPatch, onDelete }: { clip: ClipView; onEd
       <dl className="meta">
         <dt>Created</dt><dd>{new Date(clip.createdAt).toLocaleString()}</dd>
         <dt>Duration</dt><dd>{fmtDuration(clip.durationSec)}</dd>
+        {clip.pressMarkerSec !== undefined && <><dt>Saved at</dt><dd><button className="link" title="Jump to about where you pressed the hotkey" onClick={() => { if (video.current) video.current.currentTime = clip.pressMarkerSec!; }}>{fmtDuration(clip.pressMarkerSec)}</button></dd></>}
         <dt>Resolution</dt><dd>{clip.width ? `${clip.width}×${clip.height} @ ${Math.round(clip.fps)} fps` : '—'}</dd>
         <dt>Size</dt><dd>{fmtBytes(clip.sizeBytes)}</dd>
         <dt>Audio</dt><dd>{clip.audioTracks.length ? clip.audioTracks.join(', ') : 'None'}</dd>

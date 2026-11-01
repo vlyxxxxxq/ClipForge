@@ -51,6 +51,9 @@ export function CapturePage({ settings, status, onSettings, toast }: { settings:
             }} />
           </Field>
         ))}
+        <Field label="Screenshot hotkey" hint="Saves a PNG of the selected display to the Screenshots folder in your clips folder.">
+          <div className="row"><button className="btn small" onClick={() => api.screenshot()}>Take one now</button><OptionalHotkey value={c.screenshotHotkey} onChange={(hk) => set({ screenshotHotkey: hk })} /></div>
+        </Field>
         {status?.hotkeyWarnings.map((w) => <div key={w} className="banner warn">{w}</div>)}
         <p className="muted small">Using a length longer than your replay length keeps more footage in the buffer, which uses more disk space.</p>
         <Field label="Clips folder">

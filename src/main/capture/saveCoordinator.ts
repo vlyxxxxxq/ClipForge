@@ -2,7 +2,12 @@
 // save keeps its footage through expiry, pause, stop and restart. Saves are written one at a time.
 import { BufferSegment, composeSave, ReplayBuffer } from './replayBuffer';
 
-export interface SavedClip { file: string; durationSec: number; audioTracks: string[] }
+export interface SavedClip {
+  file: string;
+  durationSec: number;
+  audioTracks: string[];
+  pressSec?: number; // estimated position of the press inside the clip (within about half a second)
+}
 export type ClipPath = (ext: string) => string;
 
 export const MAX_PENDING_SAVES = 4;
@@ -32,7 +37,8 @@ export class SaveCoordinator {
   /** Resolves with the clip, or null when the press was ignored as a repeat. */
   request(duration: number, tracks: string[], clipPath: ClipPath): Promise<SavedClip | null> {
     const { buffer } = this.deps;
-    const now = (this.deps.now ?? Date.now)();
+    const clock = this.deps.now ?? Date.now;
+    const now = clock();
     if (now - this.lastPress < PRESS_DEBOUNCE_MS) return Promise.resolve(null);
     if (this.pending >= MAX_PENDING_SAVES) return Promise.reject(new Error('Too many clips are being saved. Try again in a moment.'));
     this.lastPress = now;
@@ -41,8 +47,9 @@ export class SaveCoordinator {
     const reserved = buffer.select(duration, Infinity, session);
     buffer.pin(reserved);
     let closing: BufferSegment | null = null;
+    let afterPress = 0; // seconds of footage the clip holds after the press
     const closed = this.deps.capturing()
-      ? this.waitForClosing(buffer.totalAdded, session).then((s) => { closing = s; })
+      ? this.waitForClosing(buffer.totalAdded, session).then((s) => { closing = s; if (s) afterPress = (clock() - now) / 1000; })
       : Promise.resolve();
     const snapshot = [...tracks];
     this.setPending(this.pending + 1);
@@ -51,7 +58,8 @@ export class SaveCoordinator {
       await closed;
       const segs = composeSave(reserved, closing, duration);
       if (!segs.length) throw new Error('The replay buffer is empty — wait a few seconds after starting capture.');
-      return this.deps.write(segs, snapshot, clipPath);
+      const clip = await this.deps.write(segs, snapshot, clipPath);
+      return { ...clip, pressSec: Math.max(0, clip.durationSec - afterPress) };
     }).finally(() => {
       buffer.unpin(reserved);
       if (closing) buffer.unpin([closing]);

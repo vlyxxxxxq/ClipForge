@@ -41,6 +41,25 @@ describe('SaveCoordinator', () => {
     expect(state.pending).toBe(0);
   });
 
+  it('works out where in the clip the press happened', async () => {
+    const { saves, add, state } = setup();
+    add(1, 0, 10);
+    const p = saves.request(10, [], () => 'x');
+    state.time += 1500;
+    add(1, 10, 11);
+    const clip = await p;
+    expect(clip!.durationSec).toBe(10);
+    expect(clip!.pressSec).toBeCloseTo(8.5);
+  });
+
+  it('puts the press at the end of a clip saved while paused', async () => {
+    const { saves, add, state } = setup();
+    add(1, 0, 5);
+    state.capturing = false;
+    const clip = await saves.request(4, [], () => 'x');
+    expect(clip!.pressSec).toBe(clip!.durationSec);
+  });
+
   it('keeps a queued save\'s history while an earlier save is slow', async () => {
     const { saves, add, state, buffer } = setup({ retention: 10 });
     add(1, 0, 10);
