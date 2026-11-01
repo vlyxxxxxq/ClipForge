@@ -32,7 +32,9 @@ If `npm install` leaves `node_modules/electron/dist` without `electron.exe` (see
 npm run dist
 ```
 
-This produces `release/win-unpacked/ClipForge.exe`, a portable folder (no installer) that includes the audio helper and a copy of `ffmpeg.exe`/`ffprobe.exe` taken from your Scoop install (or from `CLIPFORGE_FFMPEG_DIR`). The exe is unsigned. The .NET 10 Desktop Runtime must be installed for the audio helper.
+This produces `release/win-unpacked/ClipForge.exe`, a portable folder (no installer) that includes the audio helper and a copy of `ffmpeg.exe`/`ffprobe.exe` taken from your Scoop install (or from `CLIPFORGE_FFMPEG_DIR`). The exe is unsigned. The .NET 10 Runtime must be installed for the audio helper.
+
+**Public downloads must not include FFmpeg.** The `npm run dist` output is for your own use. Before publishing, remove `resources/resources/ffmpeg` from the copy you zip; the app then finds FFmpeg on `PATH` or through `CLIPFORGE_FFMPEG_DIR`, and shows a clear message if it can't.
 
 ## Using it
 
@@ -118,7 +120,7 @@ Not yet verified, or known gaps:
 ## Licenses and redistribution
 
 - ClipForge source: yours (marked `UNLICENSED`/private in package.json).
-- **FFmpeg:** the gyan.dev "full" build is **GPL v3** (it includes x264 and other GPL parts). Keeping it for personal use is fine. If you *distribute* a package with it, you must follow the GPL (provide the license and corresponding source or a written offer). For an LGPL-only distribution, swap in an LGPL build and drop libx264 (the software fallback would then need another encoder). `FFMPEG-LICENSE.txt` is copied into the package.
+- **FFmpeg:** not included in public downloads, which ask you to install it yourself. Local `npm run dist` builds copy your installed FFmpeg into the package; the gyan.dev "full" build is **GPL v3**, so that's fine for personal use, but sharing such a package means providing the license and the complete corresponding source for that exact build and its libraries. A link to the general FFmpeg site isn't enough.
 - **Electron/Chromium:** MIT plus bundled third-party licenses (`LICENSE.electron.txt`, `LICENSES.chromium.html` in the package).
 - **NAudio:** MIT. **.NET runtime:** MIT (installed separately).
 - React, Vite, TypeScript, Vitest, electron-builder: MIT/Apache-2.0 (dev/build time; only React ends up in the bundle).

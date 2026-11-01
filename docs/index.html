@@ -52,7 +52,7 @@
       <a class="btn primary" href="https://github.com/vlyxxxxxq/ClipForge/releases/latest">Download for Windows</a>
       <a class="btn" href="https://github.com/vlyxxxxxq/ClipForge">View source</a>
     </div>
-    <p class="small">Windows 10/11 64-bit · free · portable zip (~280 MB)</p>
+    <p class="small">Windows 10/11 64-bit · free · portable zip</p>
   </header>
 
   <section>
@@ -70,7 +70,8 @@
   <section>
     <h2>Install</h2>
     <ol>
-      <li>Install the <a href="https://dotnet.microsoft.com/download/dotnet/10.0">.NET 10 Desktop Runtime</a> (needed for audio capture).</li>
+      <li>Install the <a href="https://dotnet.microsoft.com/download/dotnet/10.0">.NET 10 Runtime</a> (needed for audio capture).</li>
+      <li>Install <a href="https://ffmpeg.org/download.html">FFmpeg</a> so it's on your PATH. The easiest way is <a href="https://scoop.sh">Scoop</a>: <code>scoop install ffmpeg</code>. ClipForge doesn't include it.</li>
       <li>Download the zip from the <a href="https://github.com/vlyxxxxxq/ClipForge/releases/latest">latest release</a> and extract it anywhere.</li>
       <li>Run <code>ClipForge\ClipForge.exe</code>. The app is unsigned, so Windows may warn the first time: click <b>More info → Run anyway</b>.</li>
       <li>Press <b>Start capture</b>, play, and press <kbd>F8</kbd> to save.</li>
@@ -87,7 +88,7 @@
   </section>
 
   <footer>
-    ClipForge is built with Electron, React and FFmpeg. The download bundles FFmpeg (gyan.dev build, GPL v3); its license is included in the zip and its source is at <a href="https://github.com/FFmpeg/FFmpeg">github.com/FFmpeg/FFmpeg</a>.
+    ClipForge is built with Electron and React, and uses your own copy of FFmpeg, which is licensed separately.
   </footer>
 </div>
 </body>
