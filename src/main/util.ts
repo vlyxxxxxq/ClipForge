@@ -26,7 +26,8 @@ export function readJson<T>(file: string, fallback: T): T {
 
 /** Atomic write that first keeps the previous good version as `<file>.bak`. */
 export function writeJsonWithBackup(file: string, data: unknown): void {
-  if (fs.existsSync(file)) fs.copyFileSync(file, `${file}.bak`);
+  // Never let a damaged file replace the last good backup.
+  if (readJson<unknown>(file, null)) fs.copyFileSync(file, `${file}.bak`);
   writeJsonAtomic(file, data);
 }
 

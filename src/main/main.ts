@@ -8,7 +8,7 @@ import { CaptureService } from './capture/captureService';
 import { LibraryStore } from './library/libraryStore';
 import { ExportService } from './export/exportService';
 import { defaultSettings, SettingsStore } from './settings';
-import { isInside, readJson, writeJsonAtomic, uniquePath } from './util';
+import { isInside, loadDocument, safeRemove, writeJsonAtomic, uniquePath } from './util';
 import { createProject, EditProject, validateProject } from '../shared/project';
 import type { CaptureStatus, ExportOptions, Settings } from '../shared/types';
 
@@ -151,20 +151,39 @@ async function loadProject(clipId: string) {
   if (!clip) throw new Error('Clip not found');
   if (!fs.existsSync(clip.filePath)) throw new Error('The clip file is missing. It may have been moved or deleted.');
   const info = await probe(clip.filePath);
-  const saved = readJson<unknown>(projectFile(clipId), null);
-  let project: EditProject = validateProject(saved) && saved.source.path === clip.filePath ? saved
-    : createProject(clipId, { path: clip.filePath, duration: info.duration, width: info.width, height: info.height, audioTracks: info.audioTracks });
-  project = { ...project, source: { path: clip.filePath, duration: info.duration, width: info.width, height: info.height, audioTracks: info.audioTracks } };
-  const cacheDir = path.join(paths.cache, clipId);
+  const st = fs.statSync(clip.filePath);
+  const source = { path: clip.filePath, duration: info.duration, width: info.width, height: info.height, audioTracks: info.audioTracks };
+  const notices: string[] = [];
+
+  const doc = loadDocument<EditProject>(projectFile(clipId), 'project', 1, (raw) => (validateProject(raw) ? raw : null));
+  if (doc.notice) notices.push(doc.notice);
+  const saved = doc.value;
+  // Edits only make sense on the footage they were made for. A file of a different shape gets a fresh
+  // project, and the old one is kept beside it rather than applied to unrelated video.
+  const sameShape = saved && Math.abs(saved.source.duration - info.duration) < 0.5 && saved.source.width === info.width && saved.source.height === info.height;
+  if (saved && !sameShape) {
+    fs.copyFileSync(projectFile(clipId), projectFile(clipId) + `.replaced-${Date.now()}`);
+    notices.push('This clip\'s video file has changed, so the editor started fresh. Your earlier edits were kept in a backup file.');
+  }
+  const project: EditProject = { ...(sameShape ? saved : createProject(clipId, source)), source };
+
+  // Caches are tied to this exact version of the file, so a relinked or replaced clip never shows old media.
+  const clipCache = path.join(paths.cache, clipId);
+  const cacheDir = path.join(clipCache, `${st.size}-${Math.round(st.mtimeMs)}`);
+  fs.mkdirSync(cacheDir, { recursive: true });
+  for (const old of fs.readdirSync(clipCache)) if (path.join(clipCache, old) !== cacheDir) safeRemove(paths.cache, path.join(clipCache, old));
   const strip = path.join(cacheDir, 'filmstrip.jpg');
   if (!fs.existsSync(strip)) await makeFilmstrip(clip.filePath, strip, info.duration).catch((e) => L.warn('filmstrip: ' + e.message));
-  const audio: string[] = [];
+  const audio: (string | null)[] = []; // indexed by track, so a failed track doesn't shift the others
   for (let k = 0; k < info.audioTracks.length; k++) {
     const f = path.join(cacheDir, `track${k}.m4a`);
     if (!fs.existsSync(f)) await extractAudioTrack(clip.filePath, k, f).catch((e) => L.warn('audio extract: ' + e.message));
-    if (fs.existsSync(f)) audio.push(mediaUrl(f));
+    const ok = fs.existsSync(f);
+    audio.push(ok ? mediaUrl(f) : null);
+    if (!ok) notices.push(`Preview audio for "${info.audioTracks[k]}" isn't available. It will still be included in exports.`);
   }
-  return { project, fps: info.fps, filmstrip: fs.existsSync(strip) ? mediaUrl(strip) : null, audio, videoUrl: mediaUrl(clip.filePath) };
+  if (info.audioTracks.length > 2) notices.push(`This clip has ${info.audioTracks.length} audio tracks. Only the first two can be mixed and exported.`);
+  return { project, fps: info.fps, filmstrip: fs.existsSync(strip) ? mediaUrl(strip) : null, audio, videoUrl: mediaUrl(clip.filePath), notices };
 }
 
 // ---- media protocol: serves only library media and app caches, with Range support ---------------

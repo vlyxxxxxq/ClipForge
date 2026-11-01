@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, fmtTime } from './api';
+import { createDebouncedSaver } from './debouncedSaver';
 import type { Toast } from './App';
 import {
   AspectMode, canvasSize, clamp, cropRect, EditProject, newId, outputDuration, outputToSource, removeSegment, setTrimEnd, setTrimStart,
@@ -7,7 +8,7 @@ import {
 } from '../shared/project';
 import type { ExportJob, ExportOptions } from '../shared/types';
 
-interface Loaded { fps: number; filmstrip: string | null; audio: string[]; videoUrl: string }
+interface Loaded { fps: number; filmstrip: string | null; audio: (string | null)[]; videoUrl: string }
 
 /** Undo/redo history. Rapid changes (slider drags) within 600 ms coalesce into one step. */
 function useHistory(initial: EditProject | null) {
@@ -46,26 +47,39 @@ export function Editor({ clipId, toast, onBack }: { clipId: string | null; toast
   const tRef = useRef(0);
   const projRef = useRef(p);
   projRef.current = p;
+  const saver = useMemo(() => createDebouncedSaver<EditProject>(api.saveProject, 500, (e) => toast('error', 'Could not save project: ' + e.message)), []);
 
   useEffect(() => {
     if (!clipId) return;
-    setError(null); setLoaded(null);
+    setError(null); setLoaded(null); setJob(null);
+    let current = true; // a slower load for a previous clip must not replace this one
     api.loadProject(clipId).then((r) => {
+      if (!current) return;
       h.reset(r.project);
+      r.notices.forEach((n) => toast('error', n));
       setLoaded({ fps: r.fps, filmstrip: r.filmstrip, audio: r.audio, videoUrl: r.videoUrl });
       setOpts((o) => ({ ...o, fileName: `${r.project.source.path.split(/[\\/]/).pop()!.replace(/\.\w+$/, '')} edit` }));
       setT(0); tRef.current = 0;
-    }).catch((e) => setError(e.message));
-    const off = api.onEvent((e) => { if (e.type === 'export') setJob((j) => (!j || j.id === (e.payload as ExportJob).id ? (e.payload as ExportJob) : j)); });
-    return off;
+    }).catch((e) => { if (current) setError(e.message); });
+    // An export keeps running while you're elsewhere, so pick its progress back up.
+    api.listExports().then((jobs) => {
+      const active = jobs.filter((j) => j.clipId === clipId && (j.state === 'queued' || j.state === 'running')).pop();
+      if (current && active) setJob(active);
+    }).catch(() => {});
+    const off = api.onEvent((e) => {
+      if (e.type !== 'export') return;
+      const next = e.payload as ExportJob;
+      if (next.clipId === clipId) setJob((j) => (!j || j.id === next.id || j.state === 'done' || j.state === 'failed' || j.state === 'cancelled' ? next : j));
+    });
+    return () => { current = false; off(); saver.flush(); };
   }, [clipId]);
 
   // Persist the project (debounced) whenever it changes.
+  useEffect(() => { if (p) saver.schedule(p); }, [p]);
   useEffect(() => {
-    if (!p) return;
-    const id = setTimeout(() => api.saveProject(p).catch((e) => toast('error', 'Could not save project: ' + e.message)), 500);
-    return () => clearTimeout(id);
-  }, [p]);
+    window.addEventListener('beforeunload', saver.flush);
+    return () => { window.removeEventListener('beforeunload', saver.flush); saver.flush(); };
+  }, [saver]);
 
   // Web Audio graph for per-track preview gain (supports >100%).
   useEffect(() => {
@@ -85,7 +99,7 @@ export function Editor({ clipId, toast, onBack }: { clipId: string | null; toast
     const vols = [p.audio.desktopMuted ? 0 : p.audio.desktopVolume, p.audio.micMuted ? 0 : p.audio.micVolume];
     gains.current.forEach((g, i) => { g.gain.value = vols[i] ?? 1; });
     const v = videoRef.current;
-    if (v && !loaded?.audio.length) { v.muted = p.audio.desktopMuted; v.volume = clamp(p.audio.desktopVolume, 0, 1); }
+    if (v && !loaded?.audio.some(Boolean)) { v.muted = p.audio.desktopMuted; v.volume = clamp(p.audio.desktopVolume, 0, 1); }
   }, [p?.audio, loaded]);
 
   const seek = useCallback((outT: number) => {
@@ -189,7 +203,7 @@ export function Editor({ clipId, toast, onBack }: { clipId: string | null; toast
         <Preview p={p} t={t} videoUrl={loaded.videoUrl} videoRef={videoRef} selText={selText} onSelectText={setSelText}
           onPan={(dx, dy) => h.set((q) => ({ ...q, framing: { ...q.framing, offsetX: clamp(q.framing.offsetX + dx, -1, 1), offsetY: clamp(q.framing.offsetY + dy, -1, 1) } }), true)}
           onMoveText={(id, x, y) => setText(id, { x, y })} />
-        {loaded.audio.map((src, i) => <audio key={src} ref={(el) => { audioRefs.current[i] = el; }} src={src} crossOrigin="anonymous" preload="auto" />)}
+        {loaded.audio.map((src, i) => src && <audio key={src} ref={(el) => { audioRefs.current[i] = el; }} src={src} crossOrigin="anonymous" preload="auto" />)}
         <div className="transport">
           <button className="btn icon" onClick={() => (playing ? pause() : play())} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
           <span className="timecode">{fmtTime(t)} / {fmtTime(duration)}</span>

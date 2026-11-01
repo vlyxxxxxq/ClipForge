@@ -143,12 +143,17 @@ export function cropRect(p: Pick<EditProject, 'aspect' | 'source' | 'framing'>):
   const w = baseW / zoom, h = baseH / zoom;
   const x = ((sw - w) / 2) * (1 + clamp(p.framing.offsetX, -1, 1));
   const y = ((sh - h) / 2) * (1 + clamp(p.framing.offsetY, -1, 1));
-  return { x: Math.round(x), y: Math.round(y), w: even(w), h: even(h) };
+  const ew = even(w), eh = even(h);
+  return { x: clamp(Math.round(x), 0, Math.max(0, sw - ew)), y: clamp(Math.round(y), 0, Math.max(0, sh - eh)), w: ew, h: eh };
 }
 
 export function validateProject(p: unknown): p is EditProject {
   const q = p as EditProject;
+  const finite = (...v: unknown[]) => v.every((n) => Number.isFinite(n));
   return !!q && q.version === 1 && Array.isArray(q.segments) && q.segments.length > 0 &&
-    q.segments.every((s) => Number.isFinite(s.start) && Number.isFinite(s.end) && s.end > s.start) &&
-    typeof q.source?.path === 'string' && Array.isArray(q.texts);
+    q.segments.every((s) => !!s && finite(s.start, s.end) && s.end > s.start) &&
+    typeof q.source?.path === 'string' && finite(q.source.duration, q.source.width, q.source.height) &&
+    finite(q.framing?.zoom, q.framing?.offsetX, q.framing?.offsetY) &&
+    finite(q.audio?.desktopVolume, q.audio?.micVolume) &&
+    Array.isArray(q.texts) && q.texts.every((t) => !!t && typeof t.text === 'string');
 }

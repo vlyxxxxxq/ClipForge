@@ -96,6 +96,18 @@ describe('library persistence', () => {
     expect(lib.notice).toContain('Restored');
   });
 
+  it('a damaged file never replaces the good backup', () => {
+    const d = tmp();
+    const file = path.join(d, 'library.json');
+    fs.writeFileSync(file, JSON.stringify({ version: 1, clips: [{ id: 'old', filePath: 'C:/old.mp4' }] }));
+    const first = new LibraryStore(d, d, media);
+    first.flush();
+    fs.writeFileSync(file, 'garbage');
+    new LibraryStore(d, d, media).flush();
+    fs.writeFileSync(file, 'garbage again');
+    expect(new LibraryStore(d, d, media).list().map((c) => c.id)).toEqual(['old']);
+  });
+
   it('never overwrites a library from a newer version', () => {
     const d = tmp();
     const newer = JSON.stringify({ version: 99, clips: [{ id: 'x', filePath: 'C:/x.mp4' }], future: true });

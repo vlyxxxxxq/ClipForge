@@ -62,3 +62,25 @@ describe('edit project', () => {
     expect(validateProject(null)).toBe(false);
   });
 });
+
+describe('cropRect at the edges', () => {
+  it('stays inside the source at the far right of a portrait crop', () => {
+    const p = createProject('c', { path: 'x', duration: 10, width: 1920, height: 1080, audioTracks: [] });
+    const r = cropRect({ ...p, aspect: '9:16', framing: { zoom: 1, offsetX: 1, offsetY: 0 } });
+    expect(r.x + r.w).toBeLessThanOrEqual(1920);
+    expect(r.y + r.h).toBeLessThanOrEqual(1080);
+  });
+});
+
+describe('validateProject', () => {
+  const good = () => createProject('c', { path: 'x', duration: 10, width: 1920, height: 1080, audioTracks: [] });
+  it('accepts a real project', () => { expect(validateProject(good())).toBe(true); });
+  it.each([
+    ['null segment', { segments: [null] }],
+    ['missing audio', { audio: undefined }],
+    ['missing framing', { framing: undefined }],
+    ['non-finite zoom', { framing: { zoom: Infinity, offsetX: 0, offsetY: 0 } }],
+    ['missing source size', { source: { path: 'x' } }],
+    ['null text', { texts: [null] }],
+  ])('rejects %s without throwing', (_name, patch) => { expect(validateProject({ ...good(), ...patch })).toBe(false); });
+});
