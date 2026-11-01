@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { buildCaptureArgs, buildSaveArgs, SEGMENT_SEC, targetSize } from './captureArgs';
 import { BufferSegment, concatScript, ReplayBuffer } from './replayBuffer';
+import { ClipPath, SaveCoordinator, SavedClip } from './saveCoordinator';
 import { ffmpeg, listMonitors, probe, detectEncoders } from '../media';
 import { freeDiskBytes, isInside, run, safeRemove } from '../util';
 import { log } from '../logger';
@@ -19,7 +20,7 @@ const RETENTION_MARGIN = 3 * SEGMENT_SEC; // keep a little extra beyond the repl
 
 type HwEncoder = Exclude<EncoderInfo['id'], never>;
 
-export interface SavedClip { file: string; durationSec: number; audioTracks: string[] }
+export type { SavedClip };
 
 export class CaptureService extends EventEmitter {
   private settings!: CaptureSettings;
@@ -34,9 +35,7 @@ export class CaptureService extends EventEmitter {
   private stopping = false;
   private encoders: EncoderInfo[] | null = null;
   private monitors: MonitorInfo[] | null = null;
-  private lastSaveRequest = 0;
-  private saveChain: Promise<unknown> = Promise.resolve();
-  private segmentWaiters: (() => void)[] = [];
+  private saves: SaveCoordinator;
   private status: CaptureStatus;
 
   constructor(private bufferRoot: string, private audioHelper: string) {
@@ -47,6 +46,15 @@ export class CaptureService extends EventEmitter {
       droppedFrames: 0, speed: null, hotkey: 'F8', hotkeyRegistered: false, hotkeyError: null, lastError: null, warnings: [],
       savingCount: 0, freeDiskBytes: null, audioTracks: [],
     };
+    this.saves = new SaveCoordinator({
+      buffer: this.buffer,
+      session: () => this.session,
+      capturing: () => this.ff !== null,
+      write: (segs, tracks, clipPath) => this.writeClip(segs, tracks, clipPath),
+      onPendingChange: (savingCount) => this.update({ savingCount }),
+      released: () => this.cleanup(),
+      segmentTimeoutMs: SEGMENT_SEC * 4000,
+    });
   }
 
   getStatus(): CaptureStatus { return { ...this.status, bufferedSeconds: Math.round(this.buffer.bufferedSeconds()) }; }
@@ -148,6 +156,7 @@ export class CaptureService extends EventEmitter {
       this.ff = null;
       this.stopPolling();
       this.pollSegments();
+      this.saves.captureEnded();
       if (this.stopping) return;
       const msg = stderr.trim().split('\n').slice(-3).join(' ').slice(0, 400) || `ffmpeg exited with code ${code}`;
       L.error(`capture ffmpeg exited (${code}) session ${session}: ${msg}`);
@@ -246,7 +255,7 @@ export class CaptureService extends EventEmitter {
     }
     if (added) {
       this.cleanup();
-      const w = this.segmentWaiters; this.segmentWaiters = []; w.forEach((f) => f());
+      this.saves.segmentAdded();
       this.update({});
     }
   }
@@ -315,9 +324,10 @@ export class CaptureService extends EventEmitter {
     await this.stopProcesses();
     if (this.diskTimer) clearInterval(this.diskTimer);
     this.diskTimer = null;
+    this.update({ state: 'stopped', fps: null, speed: null });
+    await this.saves.drain(); // accepted saves finish before their segments are removed
     for (const s of this.buffer.clear()) if (isInside(this.bufferRoot, s.file)) fs.rmSync(s.file, { force: true });
     this.removeEmptySessionDirs();
-    this.update({ state: 'stopped', fps: null, speed: null });
   }
 
   async shutdown() { await this.stop(); }
@@ -325,46 +335,16 @@ export class CaptureService extends EventEmitter {
   // ---- saving ------------------------------------------------------------------------------
 
   /**
-   * Save the last N seconds. Presses within 1 s of the previous request are ignored; saves run one
-   * after another. While recording, waits for the in-progress segment to be finalized so the clip
-   * includes the moment of the press and every file is complete.
+   * Save the last N seconds. See SaveCoordinator: footage is reserved at the press, repeated presses
+   * are ignored, and while recording the clip also includes the segment being written at the press.
    */
-  requestSave(clipPath: (ext: string) => string): Promise<SavedClip | null> {
-    const now = Date.now();
-    if (now - this.lastSaveRequest < 1000) return Promise.resolve(null);
-    this.lastSaveRequest = now;
+  requestSave(clipPath: ClipPath): Promise<SavedClip | null> {
     const state = this.status.state;
     if (state !== 'recording' && state !== 'paused') return Promise.reject(new Error('Capture is not running.'));
-    const seqAtPress = this.buffer.totalAdded; // seq of the segment being written right now
-    const duration = this.settings.replayDuration;
-    const sessionAtPress = this.session;
-    this.update({ savingCount: this.status.savingCount + 1 });
-    const job = this.saveChain.then(async () => {
-      try {
-        if (this.ff && this.session === sessionAtPress) await this.waitForSegment(seqAtPress, SEGMENT_SEC * 4000);
-        const segs = this.buffer.select(duration, seqAtPress);
-        if (!segs.length) throw new Error('The replay buffer is empty — wait a few seconds after starting capture.');
-        this.buffer.pin(segs);
-        try { return await this.writeClip(segs, clipPath); } finally { this.buffer.unpin(segs); this.cleanup(); }
-      } finally {
-        this.update({ savingCount: Math.max(0, this.status.savingCount - 1) });
-      }
-    });
-    this.saveChain = job.catch(() => {});
-    return job;
+    return this.saves.request(this.settings.replayDuration, this.status.audioTracks, clipPath);
   }
 
-  /** Resolve once the segment with this seq has been finalized (or capture ended / timeout). */
-  private waitForSegment(seq: number, timeoutMs: number): Promise<void> {
-    return new Promise((resolve) => {
-      if (this.buffer.totalAdded > seq) return resolve();
-      const t = setTimeout(() => resolve(), timeoutMs);
-      const check = () => { if (this.buffer.totalAdded > seq || !this.ff) { clearTimeout(t); resolve(); } else this.segmentWaiters.push(check); };
-      this.segmentWaiters.push(check);
-    });
-  }
-
-  private async writeClip(segs: BufferSegment[], clipPath: (ext: string) => string): Promise<SavedClip> {
+  private async writeClip(segs: BufferSegment[], tracks: string[], clipPath: ClipPath): Promise<SavedClip> {
     const final = clipPath('.mp4');
     const dir = path.dirname(final);
     fs.mkdirSync(dir, { recursive: true });
@@ -375,7 +355,7 @@ export class CaptureService extends EventEmitter {
     fs.writeFileSync(listFile, concatScript(segs));
     const tmp = path.join(dir, `.clipforge-tmp-${Date.now()}.mp4`);
     try {
-      const r = await run(ffmpeg(), buildSaveArgs(listFile, tmp, this.status.audioTracks), { timeoutMs: 120000 });
+      const r = await run(ffmpeg(), buildSaveArgs(listFile, tmp, tracks), { timeoutMs: 120000 });
       if (r.code !== 0) throw new Error('Saving clip failed: ' + r.stderr.trim().split('\n').slice(-2).join(' '));
       const info = await probe(tmp); // validate before exposing it to the library
       if (info.duration <= 0) throw new Error('Saved clip has no duration.');
@@ -403,7 +383,7 @@ export class CaptureService extends EventEmitter {
     return out;
   }
 
-  async recoverOrphan(dir: string, clipPath: (ext: string) => string): Promise<SavedClip> {
+  async recoverOrphan(dir: string, clipPath: ClipPath): Promise<SavedClip> {
     if (!isInside(this.bufferRoot, dir)) throw new Error('Invalid recovery folder');
     const segs = readSessionList(dir).filter((s) => fs.existsSync(s.file));
     const b = new ReplayBuffer(Infinity);
@@ -411,9 +391,7 @@ export class CaptureService extends EventEmitter {
     const sel = b.select(this.settings.replayDuration);
     if (!sel.length) throw new Error('No usable segments in the recovered buffer.');
     const titles = (await probe(sel[0].file).catch(() => null))?.audioTracks ?? [];
-    const prev = this.status.audioTracks;
-    this.status.audioTracks = titles;
-    try { return await this.writeClip(sel, clipPath); } finally { this.status.audioTracks = prev; }
+    return this.writeClip(sel, titles, clipPath);
   }
 
   discardOrphan(dir: string) { safeRemove(this.bufferRoot, dir); }

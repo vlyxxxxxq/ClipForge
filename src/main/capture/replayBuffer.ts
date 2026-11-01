@@ -46,11 +46,13 @@ export class ReplayBuffer {
    * Choose the newest contiguous segments of one session covering at least `duration` seconds,
    * ending with the newest segment whose seq <= `upToSeq` (defaults to the newest). Returns fewer if the
    * buffer is not yet full. Segments never span sessions, because a pause/restart breaks continuity.
+   * Pass `session` to consider only that session's segments.
    */
-  select(duration: number, upToSeq = Infinity): BufferSegment[] {
+  select(duration: number, upToSeq = Infinity, session?: number): BufferSegment[] {
     const out: BufferSegment[] = [];
     let upToIndex = this.segments.length - 1;
-    while (upToIndex >= 0 && (this.segments[upToIndex].seq ?? 0) > upToSeq) upToIndex--;
+    const skip = (s: BufferSegment) => (s.seq ?? 0) > upToSeq || (session !== undefined && s.session !== session);
+    while (upToIndex >= 0 && skip(this.segments[upToIndex])) upToIndex--;
     const endSeg = this.segments[upToIndex];
     if (!endSeg) return out;
     let total = 0;
@@ -63,6 +65,10 @@ export class ReplayBuffer {
       total += s.end - s.start;
     }
     return out;
+  }
+
+  find(seq: number, session: number): BufferSegment | null {
+    return this.segments.find((s) => s.seq === seq && s.session === session) ?? null;
   }
 
   pin(segs: BufferSegment[]) { for (const s of segs) this.pins.set(s.file, (this.pins.get(s.file) ?? 0) + 1); }
@@ -103,6 +109,22 @@ export class ReplayBuffer {
     this.segments = this.segments.filter((s) => this.isPinned(s.file));
     return removable;
   }
+}
+
+/**
+ * The segments for a clip: history reserved at the press, then the segment that was being written,
+ * dropping the oldest ones the requested duration no longer needs.
+ */
+export function composeSave(reserved: BufferSegment[], closing: BufferSegment | null, duration: number): BufferSegment[] {
+  const last = reserved[reserved.length - 1];
+  const history = closing && last && Math.abs(closing.start - last.end) > 0.5 ? [] : reserved;
+  const out = closing ? [...history, closing] : [...history];
+  let total = out.reduce((a, s) => a + s.end - s.start, 0);
+  while (out.length > 1 && total - (out[0].end - out[0].start) >= duration - 1e-3) {
+    const dropped = out.shift()!;
+    total -= dropped.end - dropped.start;
+  }
+  return out;
 }
 
 /** Build an ffconcat script for the selected segments. Paths are quoted per the concat demuxer. */
