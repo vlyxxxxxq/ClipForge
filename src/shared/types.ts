@@ -31,6 +31,7 @@ export interface GeneralSettings {
   notifyOnSave: boolean;
   launchMinimized: boolean;
   saveSound: boolean;
+  setupDone: boolean; // the first-run setup has been finished or skipped
 }
 
 export interface Settings {

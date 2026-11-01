@@ -4,6 +4,7 @@ import { Library } from './Library';
 import { Editor } from './Editor';
 import { CapturePage } from './CapturePage';
 import { GeneralPage } from './GeneralPage';
+import { Setup } from './Setup';
 import { cueForEvent, playCue } from './sounds';
 import { REPLAY_DURATIONS, type CaptureStatus, type Settings } from '../shared/types';
 
@@ -87,6 +88,10 @@ export function App() {
           {page === 'general' && settings && <GeneralPage settings={settings} onSettings={updateSettings} />}
         </div>
       </main>
+      {settings && !settings.general.setupDone && (
+        <Setup settings={settings} status={status} onSettings={updateSettings} toast={toast}
+          onDone={() => updateSettings({ ...settings, general: { ...settings.general, setupDone: true } }).catch((e) => toast('error', e.message))} />
+      )}
       <div className="toasts" role="status" aria-live="polite">
         {toasts.map((t) => <div key={t.id} className={`toast ${t.kind}`}>{t.text}</div>)}
       </div>

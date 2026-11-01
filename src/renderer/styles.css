@@ -104,6 +104,11 @@ input[type=color] { width: 44px; height: 30px; padding: 0; border: 1px solid var
 .tags input { width: 110px; padding: 3px 8px; }
 .modal-back { position: fixed; inset: 0; background: #0009; display: grid; place-items: center; z-index: 40; }
 .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; width: 520px; max-width: 92vw; }
+.modal.wide { width: 680px; }
+.setup-body { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.setup-body .setting { grid-template-columns: 1fr 300px; }
+.setup-body .row input { width: 100%; }
+.setup-body .setting-control select { width: 100%; }
 .modal h3 { text-transform: none; letter-spacing: 0; color: var(--text); font-size: 16px; }
 
 /* Settings */

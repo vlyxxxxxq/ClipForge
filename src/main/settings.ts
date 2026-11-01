@@ -9,7 +9,7 @@ export function defaultSettings(videosDir: string): Settings {
       desktopAudio: true, desktopDeviceId: null, micEnabled: false, micDeviceId: null, desktopVolume: 1, micVolume: 1,
       clipsDir: path.join(videosDir, 'ClipForge'), autoStartCapture: false,
     },
-    general: { closeToTray: true, notifyOnSave: true, launchMinimized: false, saveSound: false },
+    general: { closeToTray: true, notifyOnSave: true, launchMinimized: false, saveSound: false, setupDone: false },
   };
 }
 
@@ -48,6 +48,7 @@ export function sanitizeSettings(input: any, d: Settings): Settings {
       notifyOnSave: bool(g.notifyOnSave, d.general.notifyOnSave),
       launchMinimized: bool(g.launchMinimized, d.general.launchMinimized),
       saveSound: bool(g.saveSound, d.general.saveSound),
+      setupDone: bool(g.setupDone, d.general.setupDone),
     },
   };
 }
