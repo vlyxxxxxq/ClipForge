@@ -125,7 +125,7 @@ function CaptureBar({ status, settings, onSettings, toast, onOpenCapture }: {
         </select>
       </label>
       <div className="spacer" />
-      {status.state === 'error' && <button className="link danger" onClick={onOpenCapture}>{status.lastError?.slice(0, 80)}</button>}
+      {(status.state === 'error' || (status.state === 'paused' && status.lastError)) && <button className="link danger" title={status.lastError ?? ''} onClick={onOpenCapture}>{status.lastError?.slice(0, 80)}</button>}
       {status.state === 'stopped' || status.state === 'error'
         ? <button className="btn" onClick={() => run(api.start)}>Start capture</button>
         : <>

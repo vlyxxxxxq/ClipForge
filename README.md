@@ -77,7 +77,7 @@ Key decisions and tradeoffs:
 
 - **Sources:** whole displays only (Desktop Duplication). Per-window capture isn't implemented (FFmpeg 9 has `gfxcapture`, which could add it later).
 - **Fullscreen games:** borderless and windowed modes work. Some *exclusive* fullscreen or DRM-protected content can produce black frames under Desktop Duplication. This hasn't been tested with an exclusive-fullscreen game yet.
-- **Multiple monitors:** each DXGI output can be picked (probed by index). Only outputs on the adapter FFmpeg selects are listed. If the selected display disappears, capture pauses and notifies you instead of recording a different screen. Windows can renumber displays when one is removed, so another display could take over the selected index.
+- **Multiple monitors:** each DXGI output can be picked (probed by index). Only outputs on the adapter FFmpeg selects are listed. If the selected display becomes unavailable (unplugged, turned off, or the PC is locked), capture pauses, notifies you, and resumes by itself when it's back, instead of recording a different screen. Footage from before the interruption can't be joined to what comes after, so the replay starts again. Windows can renumber displays when one is removed, so another display could take over the selected index.
 - **Hardware encoding:** encoders are detected by actually encoding test frames. On this PC: AMD AMF works, NVENC/QSV are unavailable, and x264 is the fallback. If a hardware encoder fails at start-up, capture retries with x264 and reports why.
 - **Audio:** desktop audio comes from one output device (the default, or the one you pick), not per-application. A missing or unplugged device is skipped with a warning. If a device disappears mid-session, capture restarts without it. Surround output keeps only the front left and right channels for now, so center-channel dialogue is lost; use stereo output if that matters.
 - **Performance:** capture costs GPU and some CPU time (frame download, scaling, AAC). It isn't zero-impact. The Capture page shows measured FPS, dropped frames and encoder speed.
@@ -122,6 +122,7 @@ Not yet verified, or known gaps:
 - Dragging a clip out of the library, and pasting or dropping into Discord: the drag code and clipboard contents are in place, but a real drag and a real Discord upload need checking by hand.
 - Save sounds: the audio system was confirmed running, but nobody has listened to them, including while a game has focus or the window is hidden.
 - Press markers are estimates, within about half a second.
+- **Capture interruptions seen in real use:** FFmpeg exited with "Generic error in an external library" three times in about 12 hours of background capture on this PC. Each was followed by an automatic restart, and the last also by a period with no display available. The cause hasn't been confirmed; display sleep, locking or a fullscreen switch would fit. Check `logs\clipforge.log` for how often it happens.
 - Sleep and resume: capture is set to pause on sleep and resume afterwards, but no real sleep cycle has been tested.
 - Exporting to a second drive: built for it and covered by fake-process tests, but this PC has only one drive.
 - Low disk space: the checks exist (warn below 2 GB, stop below 500 MB, refuse saves/exports without room) but haven't been exercised on a nearly full drive.

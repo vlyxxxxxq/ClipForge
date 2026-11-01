@@ -7,6 +7,7 @@ describe('cueForEvent', () => {
     expect(cueForEvent({ type: 'screenshot-saved' })).toBe('success');
     expect(cueForEvent({ type: 'clip-save-failed' })).toBe('failure');
     expect(cueForEvent({ type: 'screenshot-failed' })).toBe('failure');
+    expect(cueForEvent({ type: 'capture-interrupted' })).toBe('failure');
     expect(cueForEvent({ type: 'library-changed' })).toBeNull();
     expect(cueForEvent({ type: 'export' })).toBeNull();
   });

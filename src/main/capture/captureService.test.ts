@@ -56,7 +56,7 @@ describe('CaptureService lifecycle', () => {
     h.procs.length = 0;
     h.spawnError = null;
     h.monitors = async () => [{ index: 0, label: 'Display 1', width: 1920, height: 1080 }];
-    svc = new CaptureService(path.join(root, 'buffer'), 'AudioCap.exe');
+    svc = new CaptureService(path.join(root, 'buffer'), 'AudioCap.exe', 10);
     svc.configure({ ...defaultSettings(root).capture, clipsDir: path.join(root, 'clips'), desktopAudio: true, micEnabled: false, encoder: 'auto' });
   });
   afterEach(async () => { await svc.stop(); fs.rmSync(root, { recursive: true, force: true }); });
@@ -126,6 +126,57 @@ describe('CaptureService lifecycle', () => {
     ffs()[0].exit(1);
     await until(() => svc.getStatus().state === 'paused');
     expect(ffs()).toHaveLength(1);
+  });
+
+  it('resumes by itself when the display comes back, telling you once each way', async () => {
+    svc.configure({ ...defaultSettings(root).capture, clipsDir: path.join(root, 'clips'), encoder: 'libx264' });
+    const lost = vi.fn(), restored = vi.fn();
+    svc.on('source-lost', lost);
+    svc.on('source-restored', restored);
+    await svc.start();
+    ffs()[0].progress();
+    h.monitors = async () => []; // the PC locked or the display turned off
+    ffs()[0].exit(3752568763);
+    await until(() => svc.getStatus().state === 'paused');
+    await tick(50); // several retries while it's away
+    expect(lost).toHaveBeenCalledOnce();
+    expect(ffs()).toHaveLength(1);
+    h.monitors = async () => [{ index: 0, label: 'Display 1', width: 1920, height: 1080 }];
+    await until(() => ffs().length === 2);
+    ffs()[1].progress();
+    expect(svc.getStatus().state).toBe('recording');
+    expect(svc.getStatus().lastError).toBeNull();
+    expect(restored).toHaveBeenCalledOnce();
+  });
+
+  it('a stop ends the wait for a display', async () => {
+    h.monitors = async () => [];
+    await svc.start();
+    expect(svc.getStatus().state).toBe('paused');
+    await svc.stop();
+    h.monitors = async () => [{ index: 0, label: 'Display 1', width: 1920, height: 1080 }];
+    await tick(50);
+    expect(h.procs).toHaveLength(0);
+    expect(svc.getStatus().state).toBe('stopped');
+  });
+
+  it('a pause you chose stays paused when the display comes back', async () => {
+    h.monitors = async () => [];
+    await svc.start();
+    await svc.pause();
+    h.monitors = async () => [{ index: 0, label: 'Display 1', width: 1920, height: 1080 }];
+    await tick(50);
+    expect(h.procs).toHaveLength(0);
+    expect(svc.getStatus().state).toBe('paused');
+  });
+
+  it('a capture failure after real progress does not blame the encoder', async () => {
+    await svc.start();
+    ffs()[0].progress();
+    ffs()[0].exit(1);
+    await until(() => ffs().length === 2);
+    expect(ffs()[1].args).toContain('h264_amf');
+    expect(svc.getStatus().encoderFallbackReason).toBeNull();
   });
 
   it('restarts after a failure at most three times in five minutes', async () => {

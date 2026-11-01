@@ -38,6 +38,8 @@ export class CaptureService extends EventEmitter {
   private pollTimer: NodeJS.Timeout | null = null;
   private diskTimer: NodeJS.Timeout | null = null;
   private stopping = false;
+  private sourceTimer: NodeJS.Timeout | null = null; // retrying while the display is unavailable
+  private waitingForSource = false;
   private generation = 0; // bumped by stop/pause/restart; a start from an older generation gives up
   private lifecycle: Promise<unknown> = Promise.resolve(); // start/stop/pause run strictly one at a time
   private encoders: EncoderInfo[] | null = null;
@@ -45,7 +47,7 @@ export class CaptureService extends EventEmitter {
   private saves: SaveCoordinator;
   private status: CaptureStatus;
 
-  constructor(private bufferRoot: string, private audioHelper: string) {
+  constructor(private bufferRoot: string, private audioHelper: string, private sourceRetryMs = 5000) {
     super();
     fs.mkdirSync(bufferRoot, { recursive: true });
     this.status = {
@@ -102,6 +104,7 @@ export class CaptureService extends EventEmitter {
 
   private async doStart(gen: number): Promise<void> {
     if (this.isActive || gen !== this.generation) return;
+    this.clearSourceTimer();
     const s = this.settings;
     this.update({ state: 'starting', lastError: null, warnings: [] });
     try {
@@ -110,19 +113,16 @@ export class CaptureService extends EventEmitter {
       if (free !== null && free < LOW_DISK_STOP) throw new Error(`Not enough free disk space for the replay buffer (${(free / 1024 ** 2).toFixed(0)} MB free).`);
       const monitors = await this.getMonitors();
       this.checkCurrent(gen);
-      if (!monitors.length) throw new Error('No capturable display found (Desktop Duplication unavailable).');
       const mon = monitors.find((m) => m.index === s.monitorIndex);
       if (!mon) {
-        // Never switch to another screen on our own: it could show something private.
         this.monitors = null;
-        const msg = 'The selected display is unavailable, so capture is paused. Reconnect it or choose another display, then resume.';
-        this.update({ state: 'paused', lastError: msg, fps: null, speed: null });
-        this.emit('source-lost', msg);
+        this.waitForSource(gen);
         return;
       }
       const encoder = await this.pickEncoder();
       this.checkCurrent(gen);
       await this.launch({ ...s, monitorIndex: mon.index }, mon, encoder.id, [], gen);
+      if (this.waitingForSource) { this.waitingForSource = false; this.emit('source-restored'); }
       this.update({ encoder: encoder.id, encoderFallbackReason: encoder.reason });
       this.startDiskMonitor();
     } catch (e: any) {
@@ -132,6 +132,29 @@ export class CaptureService extends EventEmitter {
       this.update({ state: 'error', lastError: e.message });
     }
   }
+
+  /**
+   * The display can't be captured right now: it's off, the PC is locked, or it was unplugged. Never switch
+   * to another screen, since that could show something private. Pause, say so once, and resume by ourselves
+   * as soon as this display is back, because the user still expects to be recording.
+   */
+  private waitForSource(gen: number) {
+    const msg = 'The selected display is unavailable, so capture is paused. It resumes by itself when the display is back, or you can choose another one.';
+    this.update({ state: 'paused', lastError: msg, fps: null, speed: null });
+    if (!this.waitingForSource) { this.waitingForSource = true; this.emit('source-lost', msg); }
+    this.sourceTimer = setTimeout(() => {
+      this.sourceTimer = null;
+      this.enqueue(async () => {
+        if (gen !== this.generation || this.status.state !== 'paused') return;
+        const monitors = await this.getMonitors(true);
+        if (gen !== this.generation) return;
+        if (monitors.some((m) => m.index === this.settings.monitorIndex)) await this.doStart(gen);
+        else this.waitForSource(gen);
+      });
+    }, this.sourceRetryMs);
+  }
+
+  private clearSourceTimer() { if (this.sourceTimer) clearTimeout(this.sourceTimer); this.sourceTimer = null; }
 
   private async pickEncoder(): Promise<{ id: HwEncoder; reason: string | null }> {
     const encs = await this.getEncoders();
@@ -186,7 +209,6 @@ export class CaptureService extends EventEmitter {
       this.onProgress(String(d));
     });
     const readyTimer = setTimeout(() => { if (this.ff === ff) { stderr += ' ffmpeg did not start capturing in time.'; ff.kill(); } }, READY_TIMEOUT_MS);
-    const startedAt = Date.now();
     const session = this.session;
     const onExit = (code: number | null, err?: Error) => {
       if (exited) return;
@@ -203,7 +225,7 @@ export class CaptureService extends EventEmitter {
       this.killHelpers();
       const gen = this.generation;
       // Failed before capturing anything: retry once with the software encoder and say so.
-      if (allowFallback && encoder !== 'libx264' && !err && (!progressed || Date.now() - startedAt < 8000)) {
+      if (allowFallback && encoder !== 'libx264' && !err && !progressed) {
         this.update({ encoder: 'libx264', encoderFallbackReason: `${encoder} failed to start (${msg.slice(0, 160)}); using software x264.` });
         this.enqueue(() => this.launch(s, mon, 'libx264', warnings, gen, false)).catch((e) => {
           if (!(e instanceof Superseded)) this.update({ state: 'error', lastError: e.message });
@@ -383,6 +405,8 @@ export class CaptureService extends EventEmitter {
 
   pause(): Promise<void> {
     this.generation++;
+    this.clearSourceTimer();
+    this.waitingForSource = false;
     return this.enqueue(async () => {
       if (!this.isActive) return;
       await this.stopProcesses();
@@ -397,6 +421,8 @@ export class CaptureService extends EventEmitter {
 
   stop(): Promise<void> {
     this.generation++;
+    this.clearSourceTimer();
+    this.waitingForSource = false;
     return this.enqueue(async () => {
       await this.stopProcesses();
       if (this.diskTimer) clearInterval(this.diskTimer);

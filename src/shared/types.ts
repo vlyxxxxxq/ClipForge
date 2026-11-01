@@ -105,6 +105,6 @@ export interface ExportJob {
 export interface RecoveryInfo { sessionDir: string; seconds: number; segments: number }
 
 export interface AppEvent {
-  type: 'clip-saved' | 'clip-save-failed' | 'screenshot-saved' | 'screenshot-failed' | 'library-changed' | 'library-save-failed' | 'export' | 'capture-status' | 'toast';
+  type: 'clip-saved' | 'clip-save-failed' | 'screenshot-saved' | 'screenshot-failed' | 'capture-interrupted' | 'library-changed' | 'library-save-failed' | 'export' | 'capture-status' | 'toast';
   payload: unknown;
 }

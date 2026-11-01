@@ -402,10 +402,23 @@ app.whenReady().then(async () => {
   exporter.cleanupOrphans([clipsDir, path.join(clipsDir, 'Exports'), path.join(clipsDir, 'Screenshots')]);
   library.on('changed', () => send('event', { type: 'library-changed', payload: null }));
   library.on('save-failed', (msg: string) => send('event', { type: 'library-save-failed', payload: msg }));
-  capture.on('status', (st: CaptureStatus) => { send('capture-status', st); updateTray(st); });
-  capture.on('source-lost', (msg: string) => {
-    if (Notification.isSupported()) new Notification({ title: 'Capture paused', body: msg, silent: true }).show();
+  // Capture ending by itself must never go unnoticed: you'd keep playing, believing you're recording.
+  const captureAlert = (title: string, body: string) => { if (Notification.isSupported()) new Notification({ title, body, silent: true }).show(); };
+  let lastState: CaptureStatus['state'] = 'stopped';
+  capture.on('status', (st: CaptureStatus) => {
+    send('capture-status', st);
+    updateTray(st);
+    if (st.state === 'error' && lastState !== 'error') {
+      captureAlert('Capture stopped', st.lastError ?? 'Capture stopped unexpectedly.');
+      send('event', { type: 'capture-interrupted', payload: st.lastError });
+    }
+    lastState = st.state;
   });
+  capture.on('source-lost', (msg: string) => {
+    captureAlert('Capture paused', msg);
+    send('event', { type: 'capture-interrupted', payload: msg });
+  });
+  capture.on('source-restored', () => captureAlert('Capture resumed', 'The display is back, so ClipForge is recording again.'));
   let resumeAfterSleep = false;
   powerMonitor.on('suspend', () => { resumeAfterSleep = capture.isActive; if (resumeAfterSleep) capture.pause(); });
   powerMonitor.on('resume', () => { if (resumeAfterSleep) capture.resume(); resumeAfterSleep = false; });

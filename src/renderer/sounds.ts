@@ -5,7 +5,7 @@ export type Cue = 'success' | 'failure';
 
 export function cueForEvent(e: Pick<AppEvent, 'type'>): Cue | null {
   if (e.type === 'clip-saved' || e.type === 'screenshot-saved') return 'success';
-  if (e.type === 'clip-save-failed' || e.type === 'screenshot-failed') return 'failure';
+  if (e.type === 'clip-save-failed' || e.type === 'screenshot-failed' || e.type === 'capture-interrupted') return 'failure';
   return null;
 }
 
