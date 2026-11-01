@@ -40,13 +40,13 @@ This produces `release/win-unpacked/ClipForge.exe`, a portable folder (no instal
 
 1. Open ClipForge and press **Start capture** (or enable *Start capture when ClipForge opens* on the Capture page).
 2. Play. The top bar shows the recording state, how full the buffer is and the replay length.
-3. Press **F8** (configurable) to save the last N seconds. A Windows notification confirms the save, and the clip appears in **Library**.
-4. Select a clip to preview it, rename it, tag it, favorite it, reveal it in Explorer or delete it (removing from the library only, or moving the file to the Recycle Bin).
-5. **Open in editor**: trim, split and remove sections, choose the aspect ratio, zoom and drag to reposition, balance desktop and mic audio, add text, then **Export MP4**. Exports go to `<clips folder>\Exports` and appear in the library.
+3. Press **F8** (configurable) to save the last N seconds. A Windows notification confirms the save (and an optional sound), and the clip appears in **Library**. You can also bind separate hotkeys that always save 15, 30, 60, 90 or 120 seconds, and a screenshot hotkey that saves a PNG to `<clips folder>\Screenshots`.
+4. Select a clip to preview it, rename it, tag it, favorite it, reveal it in Explorer or delete it (removing from the library only, or moving the file to the Recycle Bin). Clips are grouped by date. Ctrl+click, Shift+click or Ctrl+A selects several to favorite, tag or delete together. Drag a clip out of the library, or use **Copy file**, to put it into a chat or folder.
+5. **Open in editor**: trim, split and remove sections with the waveform as a guide, choose the aspect ratio or an export preset, zoom and drag to reposition, balance desktop and mic audio, add text and markers, then **Export MP4**. Exports go to `<clips folder>\Exports` and appear in the library.
 
 Closing the window hides it to the tray; capture keeps running. Quit from the tray menu or from Settings → About.
 
-Editor shortcuts: Space play/pause · S split · Delete remove selected section/text · I / O trim start/end to playhead · ←/→ one frame (Shift: 1 s) · Home/End · Ctrl+Z / Ctrl+Y. Ctrl+1–4 switch pages.
+Editor shortcuts: Space play/pause · S split · Delete remove selected section/text · I / O trim start/end to playhead · M add/remove marker · , / . previous/next marker · + / - zoom timeline (or Ctrl+scroll) · ←/→ one frame (Shift: 1 s), or move a focused trim handle · Home/End · Ctrl+Z / Ctrl+Y. Ctrl+1–4 switch pages.
 
 ## Architecture
 
@@ -108,14 +108,20 @@ Verified on this machine (Windows 11, Radeon RX 9070 XT, FFmpeg 9.0.2):
 | Queued saves keep their footage; session mix-ups, overflow and failures | `saveCoordinator.test.ts`, then real saves with `scripts/integration-capture.mjs` |
 | Edit saved when leaving the editor at once; damaged settings notice; replaced clip gets fresh caches and project | `scripts/integration-editor.mjs`, driving the real app with a throwaway profile (the save-on-leave check fails against the old code) |
 | Damaged, wrong-shape and newer-version library files; failed saves | `persistence.test.ts` |
+| First-run setup, date groups, multi-select, bulk tagging, delete dialog, waveform, zoom, keyboard trim, markers, preset export (1080×1920), clipboard, duplicate hotkey warning | `scripts/integration-features.mjs`, driving the real app with test-pattern clips |
+| Per-duration and screenshot hotkeys | The same script sends real F13 and F14 keys during real capture: a 16 s clip from the 15 s hotkey with a 60 s replay length, with its press marker, and a PNG |
+| Screenshot during capture | Real frame in about 0.4 s, capture kept running with no dropped frames |
 | Editor UI: 9:16, split, remove section, text, volume, export | driven through the real UI over DevTools; exported 1080×1920, 22.02 s, text rendered |
 | Export accuracy | `scripts/integration-export.mjs`: exact 13.000 s durations, 720×1280, 25% volume measured −12.0 dB, mute removes the track, overwrite protection, cancel leaves no files |
 | Packaged build | `release/win-unpacked/ClipForge.exe` with FFmpeg removed from PATH → bundled FFmpeg used, capture + save OK, clean quit |
-| Unit tests (80) | replay buffer, save queue, capture lifecycle, capture/save args, edit-project math, export filter graphs and job handling, library/settings persistence, path safety, autosave |
+| Unit tests (103) | replay buffer, save queue, capture lifecycle, capture/save args, hotkey planning, edit-project math, markers, waveforms, export presets, filter graphs and job handling, library/settings persistence, library selection, path safety, autosave |
 
 Not yet verified, or known gaps:
 
 - Exclusive-fullscreen games, HDR displays and protected content.
+- Dragging a clip out of the library, and pasting or dropping into Discord: the drag code and clipboard contents are in place, but a real drag and a real Discord upload need checking by hand.
+- Save sounds: the audio system was confirmed running, but nobody has listened to them, including while a game has focus or the window is hidden.
+- Press markers are estimates, within about half a second.
 - Sleep and resume: capture is set to pause on sleep and resume afterwards, but no real sleep cycle has been tested.
 - Exporting to a second drive: built for it and covered by fake-process tests, but this PC has only one drive.
 - Low disk space: the checks exist (warn below 2 GB, stop below 500 MB, refuse saves/exports without room) but haven't been exercised on a nearly full drive.
@@ -123,7 +129,7 @@ Not yet verified, or known gaps:
 - Mic capture has been confirmed to produce a track, but voice quality and sync haven't been judged by ear.
 - The editor preview is representative, not pixel-identical: text uses CSS layout while export uses FFmpeg drawtext with Segoe UI Bold. Position, size and timing match; line metrics can differ slightly.
 - No installer and no code signing. Windows SmartScreen may warn on first run.
-- **Known gaps:** IPC validation and the media protocol's range handling (review findings F-08 to F-10) are still to do, as are cache and log size limits (F-15), the audio resampling and clock work (F-14), and the Electron upgrade from the unsupported version 33 (F-16). See `review/`.
+- **Known gaps:** IPC validation and the media protocol's range handling (review findings F-08 to F-10) are still to do, as are cache and log size limits (F-15), the audio resampling and clock work (F-14), and the Electron upgrade from the unsupported version 33 (F-16). Game detection, per-game organization and per-app audio aren't built yet. See `review/`.
 - **Process cleanup needs no extra machinery so far:** in a hard-kill test during a real export, FFmpeg exited within 3 s and the leftover staging file was removed at the next startup. Hard kills during capture also left nothing running. That test ran FFmpeg through Scoop's launcher on PATH, not the packaged build.
 
 ## Licenses and redistribution

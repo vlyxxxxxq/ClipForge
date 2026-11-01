@@ -239,7 +239,7 @@ export function Editor({ clipId, toast, onBack }: { clipId: string | null; toast
           <span className="timecode">{fmtTime(t)} / {fmtTime(duration)}</span>
           <div className="spacer" />
           <button className="btn" onClick={() => h.set(splitAt(p, t))} title="Split at playhead (S)">Split</button>
-          <button className="btn" disabled={!selSeg || p.segments.length < 2} onClick={() => { if (selSeg) { h.set(removeSegment(p, selSeg)); setSelSeg(null); } }} title="Remove selected section (Delete)">Remove section</button>
+          <button className="btn" disabled={!selSeg || p.segments.length < 2} onClick={() => { if (selSeg) { h.set(removeSegment(p, selSeg)); setSelSeg(null); } }} title="Remove selected section (Delete)">Remove</button>
           <button className="btn" onClick={() => h.set(setTrimStart(p, outputToSource(p, t).time))} title="Trim start to playhead (I)">Trim start</button>
           <button className="btn" onClick={() => h.set(setTrimEnd(p, outputToSource(p, t).time))} title="Trim end to playhead (O)">Trim end</button>
           <button className="btn" onClick={() => h.set(toggleMarker(p, outputToSource(p, t).time))} title="Add or remove a marker at the playhead (M)">Marker</button>
@@ -307,14 +307,14 @@ export function Editor({ clipId, toast, onBack }: { clipId: string | null; toast
               </select></label>
             <label className="field compact"><span>Frame rate</span>
               <select value={String(opts.fps)} onChange={(e) => setOpts({ ...opts, fps: e.target.value === 'source' ? 'source' : (Number(e.target.value) as 30 | 60) })}>
-                <option value="source">Source ({Math.round(loaded.fps)})</option><option value="60">60</option><option value="30">30</option>
+                <option value="source">Source</option><option value="60">60</option><option value="30">30</option>
               </select></label>
             <label className="field compact"><span>Quality</span>
               <select value={opts.quality} onChange={(e) => setOpts({ ...opts, quality: e.target.value as any })}>
                 <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="ultra">Ultra</option>
               </select></label>
           </div>
-          <p className="muted small">{exportSize.width}×{exportSize.height} · {fmtTime(duration)} · H.264/AAC MP4 · saved to Clips\Exports</p>
+          <p className="muted small">{exportSize.width}×{exportSize.height} at {opts.fps === 'source' ? Math.round(loaded.fps) : opts.fps} fps · {fmtTime(duration)} · H.264/AAC MP4 · saved to Clips\Exports</p>
           {job?.state === 'queued' || job?.state === 'running' ? (
             <div className="export-progress">
               <div className="meter big" role="progressbar" aria-valuenow={Math.round(job.progress * 100)} aria-valuemin={0} aria-valuemax={100}><div style={{ width: `${job.progress * 100}%` }} /></div>
