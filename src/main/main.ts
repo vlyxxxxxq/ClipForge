@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, protocol, shell, Tray } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerMonitor, protocol, shell, Tray } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -107,6 +107,18 @@ function registerHotkey(accel: string): { ok: boolean; error: string | null } {
   return { ok, error };
 }
 
+// ---- capture restarts ---------------------------------------------------------------------
+
+// Sliders send many settings changes per second; restart once, after they settle.
+let restartTimer: NodeJS.Timeout | null = null;
+function scheduleCaptureRestart() {
+  if (restartTimer) clearTimeout(restartTimer);
+  restartTimer = setTimeout(async () => {
+    restartTimer = null;
+    if (capture.isActive) { await capture.stop(); await capture.start(); }
+  }, 600);
+}
+
 // ---- clips --------------------------------------------------------------------------------
 
 function clipName(ext: string) {
@@ -202,7 +214,7 @@ function registerIpc() {
     if (s.capture.hotkey !== prev.capture.hotkey) hotkey = registerHotkey(s.capture.hotkey);
     const restartNeeded = JSON.stringify({ ...prev.capture, hotkey: 0, replayDuration: 0, clipsDir: 0, autoStartCapture: 0 }) !==
       JSON.stringify({ ...s.capture, hotkey: 0, replayDuration: 0, clipsDir: 0, autoStartCapture: 0 });
-    if (restartNeeded && capture.isActive) { await capture.stop(); await capture.start(); }
+    if (restartNeeded) scheduleCaptureRestart();
     return { settings: s, hotkey };
   });
   h('capture:status', () => capture.getStatus());
@@ -299,6 +311,12 @@ app.whenReady().then(async () => {
   exporter.cleanupOrphans();
   library.on('changed', () => send('event', { type: 'library-changed', payload: null }));
   capture.on('status', (st: CaptureStatus) => { send('capture-status', st); updateTray(st); });
+  capture.on('source-lost', (msg: string) => {
+    if (Notification.isSupported()) new Notification({ title: 'Capture paused', body: msg, silent: true }).show();
+  });
+  let resumeAfterSleep = false;
+  powerMonitor.on('suspend', () => { resumeAfterSleep = capture.isActive; if (resumeAfterSleep) capture.pause(); });
+  powerMonitor.on('resume', () => { if (resumeAfterSleep) capture.resume(); resumeAfterSleep = false; });
   exporter.on('job', (job) => {
     send('event', { type: 'export', payload: job });
     if (job.state === 'done' && job.outputPath) library.addFile(job.outputPath, 'export', { sourceClipId: job.clipId }).catch(() => {});
@@ -323,6 +341,7 @@ app.on('before-quit', (e) => {
   (async () => {
     try {
       globalShortcut.unregisterAll();
+      if (restartTimer) clearTimeout(restartTimer);
       exporter?.cancelAll();
       await capture?.shutdown();
       library?.flush();

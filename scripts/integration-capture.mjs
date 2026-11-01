@@ -23,8 +23,9 @@ const probe = (f) => JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-print_
 const results = {};
 
 await svc.start();
+for (let i = 0; i < 100 && svc.getStatus().state === 'starting'; i++) await sleep(100); // recording begins with ffmpeg's first progress report
 console.log('status after start', JSON.stringify(svc.getStatus()));
-if (svc.getStatus().state !== 'recording') process.exit(1);
+if (svc.getStatus().state !== 'recording') { await svc.stop(); process.exit(1); }
 await sleep(5000);
 const early = svc.requestSave(name); // before buffer is full
 const dup = svc.requestSave(name); // within 1 s: must be ignored

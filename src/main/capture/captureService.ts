@@ -17,6 +17,11 @@ const L = log('capture');
 const LOW_DISK_WARN = 2 * 1024 ** 3;
 const LOW_DISK_STOP = 500 * 1024 ** 2;
 const RETENTION_MARGIN = 3 * SEGMENT_SEC; // keep a little extra beyond the replay duration
+const READY_TIMEOUT_MS = 20000; // ffmpeg reports progress every second once it is really capturing
+const HELPER_EXIT_TIMEOUT_MS = 2500;
+
+/** A start that a later stop or pause overtook. */
+class Superseded extends Error {}
 
 type HwEncoder = Exclude<EncoderInfo['id'], never>;
 
@@ -33,6 +38,8 @@ export class CaptureService extends EventEmitter {
   private pollTimer: NodeJS.Timeout | null = null;
   private diskTimer: NodeJS.Timeout | null = null;
   private stopping = false;
+  private generation = 0; // bumped by stop/pause/restart; a start from an older generation gives up
+  private lifecycle: Promise<unknown> = Promise.resolve(); // start/stop/pause run strictly one at a time
   private encoders: EncoderInfo[] | null = null;
   private monitors: MonitorInfo[] | null = null;
   private saves: SaveCoordinator;
@@ -80,29 +87,48 @@ export class CaptureService extends EventEmitter {
 
   // ---- lifecycle ---------------------------------------------------------------------------
 
-  async start(): Promise<void> {
-    if (this.isActive) return;
+  private enqueue<T>(op: () => Promise<T>): Promise<T> {
+    const run = this.lifecycle.then(op);
+    this.lifecycle = run.catch(() => {});
+    return run;
+  }
+
+  private checkCurrent(gen: number) { if (gen !== this.generation) throw new Superseded(); }
+
+  start(): Promise<void> {
+    const gen = this.generation;
+    return this.enqueue(() => this.doStart(gen));
+  }
+
+  private async doStart(gen: number): Promise<void> {
+    if (this.isActive || gen !== this.generation) return;
     const s = this.settings;
     this.update({ state: 'starting', lastError: null, warnings: [] });
     try {
       const free = await freeDiskBytes(this.bufferRoot);
+      this.checkCurrent(gen);
       if (free !== null && free < LOW_DISK_STOP) throw new Error(`Not enough free disk space for the replay buffer (${(free / 1024 ** 2).toFixed(0)} MB free).`);
       const monitors = await this.getMonitors();
+      this.checkCurrent(gen);
       if (!monitors.length) throw new Error('No capturable display found (Desktop Duplication unavailable).');
-      let mon = monitors.find((m) => m.index === s.monitorIndex);
-      const warnings: string[] = [];
+      const mon = monitors.find((m) => m.index === s.monitorIndex);
       if (!mon) {
-        mon = monitors[0];
-        warnings.push(`Selected display is unavailable; capturing ${mon.label} instead.`);
+        // Never switch to another screen on our own: it could show something private.
         this.monitors = null;
+        const msg = 'The selected display is unavailable, so capture is paused. Reconnect it or choose another display, then resume.';
+        this.update({ state: 'paused', lastError: msg, fps: null, speed: null });
+        this.emit('source-lost', msg);
+        return;
       }
       const encoder = await this.pickEncoder();
-      await this.launch({ ...s, monitorIndex: mon.index }, mon, encoder.id, warnings);
+      this.checkCurrent(gen);
+      await this.launch({ ...s, monitorIndex: mon.index }, mon, encoder.id, [], gen);
       this.update({ encoder: encoder.id, encoderFallbackReason: encoder.reason });
       this.startDiskMonitor();
     } catch (e: any) {
-      L.error('start failed: ' + e.message);
       await this.killProcesses();
+      if (e instanceof Superseded) return; // the command that overtook this start sets the final state
+      L.error('start failed: ' + e.message);
       this.update({ state: 'error', lastError: e.message });
     }
   }
@@ -121,7 +147,7 @@ export class CaptureService extends EventEmitter {
     return { id: 'libx264', reason: 'No working hardware encoder found; using software x264 (higher CPU use).' };
   }
 
-  private async launch(s: CaptureSettings, mon: MonitorInfo, encoder: HwEncoder, warnings: string[], allowFallback = true) {
+  private async launch(s: CaptureSettings, mon: MonitorInfo, encoder: HwEncoder, warnings: string[], gen: number, allowFallback = true) {
     this.session++;
     this.sessionDir = path.join(this.bufferRoot, `session-${Date.now()}`);
     fs.mkdirSync(this.sessionDir, { recursive: true });
@@ -139,6 +165,7 @@ export class CaptureService extends EventEmitter {
       } catch (e: any) {
         warnings.push(`${t.title} audio unavailable: ${e.message}`);
       }
+      this.checkCurrent(gen);
     }
 
     const args = buildCaptureArgs({ settings: s, encoder, sourceWidth: mon.width, sourceHeight: mon.height, audioPipes: pipes, segmentDir: this.sessionDir, join: path.join });
@@ -147,48 +174,68 @@ export class CaptureService extends EventEmitter {
     this.ff = ff;
     this.stopping = false;
     let stderr = '';
+    let progressed = false;
+    let exited = false;
     ff.stderr!.on('data', (d) => { stderr = (stderr + d).slice(-4000); });
-    ff.stdout!.on('data', (d) => this.onProgress(String(d)));
+    ff.stdin!.on('error', (e) => L.warn('capture stdin: ' + e.message));
+    ff.stdout!.on('data', (d) => {
+      if (this.ff !== ff) return;
+      progressed = true;
+      clearTimeout(readyTimer);
+      if (this.status.state === 'starting') this.update({ state: 'recording' });
+      this.onProgress(String(d));
+    });
+    const readyTimer = setTimeout(() => { if (this.ff === ff) { stderr += ' ffmpeg did not start capturing in time.'; ff.kill(); } }, READY_TIMEOUT_MS);
     const startedAt = Date.now();
     const session = this.session;
-    ff.on('close', (code) => {
+    const onExit = (code: number | null, err?: Error) => {
+      if (exited) return;
+      exited = true;
+      clearTimeout(readyTimer);
       if (this.ff !== ff) return;
       this.ff = null;
       this.stopPolling();
       this.pollSegments();
       this.saves.captureEnded();
       if (this.stopping) return;
-      const msg = stderr.trim().split('\n').slice(-3).join(' ').slice(0, 400) || `ffmpeg exited with code ${code}`;
+      const msg = err?.message ?? (stderr.trim().split('\n').slice(-3).join(' ').slice(0, 400) || `ffmpeg exited with code ${code}`);
       L.error(`capture ffmpeg exited (${code}) session ${session}: ${msg}`);
       this.killHelpers();
-      // Early encoder failure: retry once with the software encoder and say so.
-      if (allowFallback && encoder !== 'libx264' && Date.now() - startedAt < 8000) {
+      const gen = this.generation;
+      // Failed before capturing anything: retry once with the software encoder and say so.
+      if (allowFallback && encoder !== 'libx264' && !err && (!progressed || Date.now() - startedAt < 8000)) {
         this.update({ encoder: 'libx264', encoderFallbackReason: `${encoder} failed to start (${msg.slice(0, 160)}); using software x264.` });
-        this.launch(s, mon, 'libx264', warnings, false).catch((e) => this.update({ state: 'error', lastError: e.message }));
+        this.enqueue(() => this.launch(s, mon, 'libx264', warnings, gen, false)).catch((e) => {
+          if (!(e instanceof Superseded)) this.update({ state: 'error', lastError: e.message });
+        });
         return;
       }
       // Mid-session failure (display disconnected, mode change, driver reset): re-detect sources and
-      // restart, at most 3 times per 5 minutes. The buffer keeps earlier sessions' segments until they expire.
-      const now = Date.now();
-      this.autoRestarts = this.autoRestarts.filter((t) => now - t < 300000);
-      if (Date.now() - startedAt >= 8000 && this.autoRestarts.length < 3) {
-        this.autoRestarts.push(now);
+      // restart. The buffer keeps earlier sessions' segments until they expire.
+      if (progressed && this.allowRestart()) {
         this.monitors = null;
         this.update({ state: 'stopped' });
-        this.start().then(() => this.update({ warnings: [...this.status.warnings, `Capture restarted after an error: ${msg.slice(0, 160)}`] }));
+        this.enqueue(async () => {
+          await this.doStart(gen);
+          if (this.isActive) this.update({ warnings: [...this.status.warnings, `Capture restarted after an error: ${msg.slice(0, 160)}`] });
+        });
         return;
       }
       this.update({ state: 'error', lastError: `Capture stopped unexpectedly: ${msg}` });
-    });
+    };
+    ff.on('error', (e) => onExit(null, e));
+    ff.on('close', (code) => onExit(code));
     this.pollTimer = setInterval(() => this.pollSegments(), 250);
-    this.update({ state: 'recording', warnings, audioTracks: pipes.map((p) => p.title), droppedFrames: 0 });
+    this.update({ state: 'starting', warnings, audioTracks: pipes.map((p) => p.title), droppedFrames: 0 });
   }
 
   private spawnHelper(pipe: string, source: string, device: string | null): Promise<void> {
     return new Promise((resolve, reject) => {
       const args = ['capture', '--pipe', pipe, '--source', source];
       if (device) args.push('--device', device);
+      const session = this.session;
       const p = spawn(this.audioHelper, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+      p.stdin!.on('error', (e) => L.warn('audio helper stdin: ' + e.message));
       let err = '';
       let ready = false;
       const t = setTimeout(() => { p.kill(); reject(new Error('audio helper did not start')); }, 8000);
@@ -200,7 +247,7 @@ export class CaptureService extends EventEmitter {
         const msg = err.trim().split('\n').pop() || `exit ${code}`;
         if (!ready) return reject(new Error(msg.replace(/^fatal: /, '')));
         this.helpers = this.helpers.filter((h) => h !== p);
-        if (!this.stopping && this.ff && code !== 0) {
+        if (this.session === session && !this.stopping && this.ff && code !== 0) {
           // A device vanished mid-session. Restart capture so audio and video stay aligned.
           L.warn(`audio helper ${source} exited: ${msg}`);
           this.restartAfterDeviceLoss(`${source === 'mic' ? 'Microphone' : 'Desktop audio'} device lost (${msg}). Capture restarted.`);
@@ -212,15 +259,30 @@ export class CaptureService extends EventEmitter {
 
   private restarting = false;
   private autoRestarts: number[] = [];
-  private async restartAfterDeviceLoss(warning: string) {
+
+  /** At most 3 automatic restarts per 5 minutes, across every kind of failure. */
+  private allowRestart(): boolean {
+    const now = Date.now();
+    this.autoRestarts = this.autoRestarts.filter((t) => now - t < 300000);
+    if (this.autoRestarts.length >= 3) return false;
+    this.autoRestarts.push(now);
+    return true;
+  }
+
+  private restartAfterDeviceLoss(warning: string) {
     if (this.restarting) return;
     this.restarting = true;
-    try {
-      await this.stopProcesses();
-      this.update({ state: 'stopped' });
-      await this.start();
-      this.update({ warnings: [...this.status.warnings, warning] });
-    } finally { this.restarting = false; }
+    const gen = ++this.generation;
+    this.enqueue(async () => {
+      try {
+        await this.stopProcesses();
+        if (gen !== this.generation) return;
+        if (!this.allowRestart()) { this.update({ state: 'error', lastError: `Capture stopped: ${warning}` }); return; }
+        this.update({ state: 'stopped' });
+        await this.doStart(gen);
+        if (this.isActive) this.update({ warnings: [...this.status.warnings, warning] });
+      } finally { this.restarting = false; }
+    });
   }
 
   private onProgress(chunk: string) {
@@ -290,9 +352,16 @@ export class CaptureService extends EventEmitter {
 
   private stopPolling() { if (this.pollTimer) clearInterval(this.pollTimer); this.pollTimer = null; }
 
-  private killHelpers() {
-    for (const h of this.helpers) { try { h.stdin?.end(); } catch {} setTimeout(() => { if (h.exitCode === null) h.kill(); }, 1500); }
+  /** Ask the helpers to exit (they quit when stdin closes) and wait for them, within reason. */
+  private killHelpers(): Promise<void> {
+    const helpers = this.helpers;
     this.helpers = [];
+    return Promise.all(helpers.map((h) => new Promise<void>((resolve) => {
+      if (h.exitCode !== null) return resolve();
+      const t = setTimeout(() => { h.kill(); resolve(); }, HELPER_EXIT_TIMEOUT_MS);
+      h.once('close', () => { clearTimeout(t); resolve(); });
+      try { h.stdin?.end(); } catch {}
+    }))).then(() => {});
   }
 
   /** Gracefully end ffmpeg ('q' finalizes the current segment), then the helpers. */
@@ -300,34 +369,43 @@ export class CaptureService extends EventEmitter {
     this.stopping = true;
     const ff = this.ff;
     if (ff) {
-      const done = new Promise<void>((r) => ff.once('close', () => r()));
+      const done = new Promise<void>((r) => { ff.once('close', () => r()); ff.once('error', () => r()); });
       try { ff.stdin?.write('q'); } catch {}
       const t = setTimeout(() => ff.kill(), 4000);
       await done;
       clearTimeout(t);
     }
-    this.killHelpers();
+    await this.killHelpers();
     this.stopPolling();
   }
 
-  private async killProcesses() { this.stopping = true; this.ff?.kill(); this.ff = null; this.killHelpers(); this.stopPolling(); }
+  private async killProcesses() { this.stopping = true; this.ff?.kill(); this.ff = null; this.saves.captureEnded(); await this.killHelpers(); this.stopPolling(); }
 
-  async pause() {
-    if (!this.isActive) return;
-    await this.stopProcesses();
-    this.update({ state: 'paused', fps: null, speed: null });
+  pause(): Promise<void> {
+    this.generation++;
+    return this.enqueue(async () => {
+      if (!this.isActive) return;
+      await this.stopProcesses();
+      this.update({ state: 'paused', fps: null, speed: null });
+    });
   }
 
-  async resume() { if (this.status.state === 'paused') await this.start(); }
+  resume(): Promise<void> {
+    const gen = this.generation;
+    return this.enqueue(async () => { if (this.status.state === 'paused') await this.doStart(gen); });
+  }
 
-  async stop() {
-    await this.stopProcesses();
-    if (this.diskTimer) clearInterval(this.diskTimer);
-    this.diskTimer = null;
-    this.update({ state: 'stopped', fps: null, speed: null });
-    await this.saves.drain(); // accepted saves finish before their segments are removed
-    for (const s of this.buffer.clear()) if (isInside(this.bufferRoot, s.file)) fs.rmSync(s.file, { force: true });
-    this.removeEmptySessionDirs();
+  stop(): Promise<void> {
+    this.generation++;
+    return this.enqueue(async () => {
+      await this.stopProcesses();
+      if (this.diskTimer) clearInterval(this.diskTimer);
+      this.diskTimer = null;
+      this.update({ state: 'stopped', fps: null, speed: null, lastError: null });
+      await this.saves.drain(); // accepted saves finish before their segments are removed
+      for (const s of this.buffer.clear()) if (isInside(this.bufferRoot, s.file)) fs.rmSync(s.file, { force: true });
+      this.removeEmptySessionDirs();
+    });
   }
 
   async shutdown() { await this.stop(); }

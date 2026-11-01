@@ -1,4 +1,4 @@
-// Starts capture with a nonexistent microphone and display index; capture must still run, with warnings.
+// A missing display must pause capture and say so. Then a nonexistent microphone and an unavailable encoder must still record, with warnings.
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,6 +13,10 @@ await initMedia(path.join(root, 'none'));
 const svc = new CaptureService(path.join(root, 'buffer'), path.resolve('native/bin/AudioCap.exe'));
 svc.configure({ ...defaultSettings(root).capture, clipsDir: path.join(root, 'clips'), replayDuration: 15, micEnabled: true, micDeviceId: '{0.0.1.00000000}.{deadbeef-0000-0000-0000-000000000000}', monitorIndex: 7, encoder: 'h264_nvenc' });
 await svc.start();
+const missingDisplay = svc.getStatus();
+console.log(JSON.stringify({ missingDisplay: { state: missingDisplay.state, lastError: missingDisplay.lastError } }));
+svc.configure({ ...defaultSettings(root).capture, clipsDir: path.join(root, 'clips'), replayDuration: 15, micEnabled: true, micDeviceId: '{0.0.1.00000000}.{deadbeef-0000-0000-0000-000000000000}', monitorIndex: 0, encoder: 'h264_nvenc' });
+await svc.resume();
 await new Promise((r) => setTimeout(r, 4000));
 const s = svc.getStatus();
 const clip = await svc.requestSave(() => path.join(root, 'clips', 'c.mp4'));
