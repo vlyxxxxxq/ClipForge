@@ -144,9 +144,10 @@ export function Library({ onEdit, toast, status }: { onEdit: (id: string) => voi
                     <div className="grid">
                       {g.clips.map((c) => (
                         <div key={c.id} role="option" aria-selected={selection.checked.has(c.id)} className={`card ${selection.checked.has(c.id) ? 'selected' : ''}`}
+                          draggable={c.status === 'ok'} onDragStart={(e) => { e.preventDefault(); api.dragClip(c.id).catch((err) => toast('error', err.message)); }}
                           onClick={(e) => setSelection((s) => clickSelection(s, c.id, order, { ctrl: e.ctrlKey, shift: e.shiftKey }))} onDoubleClick={() => c.status === 'ok' && onEdit(c.id)}>
                           <div className="thumb">
-                            {c.thumbnailUrl ? <img src={c.thumbnailUrl} alt="" loading="lazy" /> : <div className="thumb-ph">{c.status === 'pending' ? 'Processing…' : c.status === 'missing' ? 'File missing' : c.status === 'corrupt' ? 'Unreadable' : ''}</div>}
+                            {c.thumbnailUrl ? <img src={c.thumbnailUrl} alt="" loading="lazy" draggable={false} /> : <div className="thumb-ph">{c.status === 'pending' ? 'Processing…' : c.status === 'missing' ? 'File missing' : c.status === 'corrupt' ? 'Unreadable' : ''}</div>}
                             <span className="badge">{fmtDuration(c.durationSec)}</span>
                             {c.kind === 'export' && <span className="badge left">Export</span>}
                             {c.status !== 'ok' && c.status !== 'pending' && <span className="badge left danger">{c.status}</span>}
@@ -165,7 +166,7 @@ export function Library({ onEdit, toast, status }: { onEdit: (id: string) => voi
             )}
       </section>
       <aside className="preview-panel" aria-label="Clip details">
-        {sel ? <ClipDetails key={sel.id} clip={sel} onEdit={onEdit} onPatch={(p) => patch(sel.id, p)} onDelete={() => setConfirmDelete([sel])} />
+        {sel ? <ClipDetails key={sel.id} clip={sel} toast={toast} onEdit={onEdit} onPatch={(p) => patch(sel.id, p)} onDelete={() => setConfirmDelete([sel])} />
           : <div className="empty small">Select a clip to preview it.</div>}
       </aside>
       {confirmDelete && (
@@ -183,7 +184,7 @@ export function Library({ onEdit, toast, status }: { onEdit: (id: string) => voi
   );
 }
 
-function ClipDetails({ clip, onEdit, onPatch, onDelete }: { clip: ClipView; onEdit: (id: string) => void; onPatch: (p: Partial<ClipView>) => void; onDelete: () => void }) {
+function ClipDetails({ clip, toast, onEdit, onPatch, onDelete }: { clip: ClipView; toast: (k: Toast['kind'], t: string) => void; onEdit: (id: string) => void; onPatch: (p: Partial<ClipView>) => void; onDelete: () => void }) {
   const [title, setTitle] = useState(clip.title);
   const [tag, setTag] = useState('');
   useEffect(() => setTitle(clip.title), [clip.title]);
@@ -216,6 +217,7 @@ function ClipDetails({ clip, onEdit, onPatch, onDelete }: { clip: ClipView; onEd
         <button className={`btn ${clip.favorite ? 'toggled' : ''}`} onClick={() => onPatch({ favorite: !clip.favorite })}>★ {clip.favorite ? 'Favorited' : 'Favorite'}</button>
         {clip.status === 'missing' ? <button className="btn" onClick={() => api.relink(clip.id)}>Locate file…</button>
           : <button className="btn" onClick={() => api.reveal(clip.id)}>Show in Explorer</button>}
+        <button className="btn" disabled={clip.status !== 'ok'} title="Copies the file, ready to paste into a chat or folder. You can also drag a clip out of the library." onClick={() => api.copyClip(clip.id).then(() => toast('ok', 'File copied. Paste it wherever you need it.')).catch((e) => toast('error', e.message))}>Copy file</button>
         <button className="btn danger" onClick={onDelete}>Delete…</button>
       </div>
     </div>

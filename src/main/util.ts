@@ -108,6 +108,17 @@ export function run(cmd: string, args: string[], opts: SpawnOptions & { timeoutM
   });
 }
 
+/**
+ * Put a file on the Windows clipboard the way Explorer's Copy does. The path travels in an environment
+ * variable, so the PowerShell command is a fixed string and a file name can never become code.
+ */
+export async function copyFileToClipboard(file: string): Promise<void> {
+  const r = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Set-Clipboard -LiteralPath $env:CLIPFORGE_CLIP_FILE'], {
+    env: { ...process.env, CLIPFORGE_CLIP_FILE: file }, timeoutMs: 15000,
+  });
+  if (r.code !== 0) throw new Error('Could not copy the file to the clipboard.');
+}
+
 export async function freeDiskBytes(dir: string): Promise<number | null> {
   try {
     const s = await fs.promises.statfs(dir);

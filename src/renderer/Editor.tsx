@@ -322,7 +322,7 @@ export function Editor({ clipId, toast, onBack }: { clipId: string | null; toast
               <button className="btn" onClick={() => api.cancelExport(job.id)}>Cancel</button>
             </div>
           ) : <button className="btn primary wide" onClick={startExport}>Export MP4</button>}
-          {job?.state === 'done' && job.outputPath && <p className="ok small">Exported. <button className="link" onClick={() => api.revealExport(job.outputPath!)}>Show in Explorer</button></p>}
+          {job?.state === 'done' && job.outputPath && <p className="ok small">Exported. <button className="link" onClick={() => api.revealExport(job.id).catch((e) => toast('error', e.message))}>Show in Explorer</button> · <button className="link" onClick={() => api.copyExport(job.id).then(() => toast('ok', 'File copied. Paste it wherever you need it.')).catch((e) => toast('error', e.message))}>Copy file</button></p>}
           {job?.state === 'failed' && <p className="error-text small">Export failed: {job.error}</p>}
           {job?.state === 'cancelled' && <p className="muted small">Export cancelled. No file was written.</p>}
         </section>

@@ -9,7 +9,7 @@ import { LibraryStore } from './library/libraryStore';
 import { ExportService } from './export/exportService';
 import { HotkeyAction, planHotkeys } from './hotkeys';
 import { defaultSettings, SettingsStore } from './settings';
-import { isInside, loadDocument, readJson, safeRemove, writeJsonAtomic, uniquePath } from './util';
+import { copyFileToClipboard, isInside, loadDocument, readJson, safeRemove, writeJsonAtomic, uniquePath } from './util';
 import { createProject, EditProject, validateProject } from '../shared/project';
 import type { CaptureStatus, ExportOptions, Settings } from '../shared/types';
 
@@ -318,6 +318,23 @@ function registerIpc() {
     fs.rmSync(path.join(paths.cache, c.id), { recursive: true, force: true });
   });
   h('library:reveal', (id: string) => { const c = library.get(str(id)); if (c && fs.existsSync(c.filePath)) shell.showItemInFolder(c.filePath); else if (c) shell.openPath(path.dirname(c.filePath)); });
+  const existingClip = (id: string) => {
+    const c = library.get(str(id));
+    if (!c || !fs.existsSync(c.filePath)) throw new Error('The clip file is missing.');
+    return c;
+  };
+  const finishedExport = (id: string) => {
+    const j = exporter.list().find((x) => x.id === str(id));
+    if (j?.state !== 'done' || !j.outputPath || !fs.existsSync(j.outputPath)) throw new Error('That export is no longer available.');
+    return j.outputPath;
+  };
+  h('library:copy', (id: string) => copyFileToClipboard(existingClip(id).filePath));
+  ipcMain.handle('library:drag', (e, id: string) => {
+    const c = existingClip(id);
+    const thumb = c.thumbnail ? nativeImage.createFromPath(c.thumbnail) : null;
+    const icon = thumb && !thumb.isEmpty() ? thumb.resize({ width: 96 }) : trayIcon('stopped');
+    e.sender.startDrag({ file: c.filePath, icon });
+  });
   h('library:relink', async (id: string) => {
     const r = await dialog.showOpenDialog(win!, { title: 'Locate clip', properties: ['openFile'], filters: [{ name: 'Video', extensions: ['mp4', 'mkv', 'mov'] }] });
     if (!r.canceled && r.filePaths[0]) await library.relink(str(id), r.filePaths[0]);
@@ -349,7 +366,8 @@ function registerIpc() {
   });
   h('export:cancel', (id: string) => exporter.cancel(str(id)));
   h('export:list', () => exporter.list());
-  h('export:reveal', (file: string) => { if (fs.existsSync(str(file))) shell.showItemInFolder(file); });
+  h('export:reveal', (id: string) => shell.showItemInFolder(finishedExport(id)));
+  h('export:copy', (id: string) => copyFileToClipboard(finishedExport(id)));
   h('recovery:list', () => capture.findOrphans());
   h('recovery:recover', async (dir: string) => {
     const saved = await capture.recoverOrphan(str(dir), clipName);

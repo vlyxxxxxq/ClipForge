@@ -5,8 +5,8 @@ const invoke = (ch: string) => (...args: unknown[]) => ipcRenderer.invoke(ch, ..
 const channels = [
   'app:info', 'app:openLogs', 'app:quit', 'settings:get', 'settings:set', 'capture:status', 'capture:start', 'capture:stop', 'capture:pause',
   'capture:resume', 'capture:save', 'capture:screenshot', 'capture:devices', 'library:list', 'library:refresh', 'library:update',
-  'library:delete', 'library:reveal', 'library:relink', 'library:import', 'editor:load', 'editor:waveform', 'editor:save', 'export:start',
-  'export:cancel', 'export:list', 'export:reveal', 'recovery:list', 'recovery:recover', 'recovery:discard', 'dialog:folder',
+  'library:delete', 'library:copy', 'library:drag', 'library:reveal', 'library:relink', 'library:import', 'editor:load', 'editor:waveform', 'editor:save', 'export:start',
+  'export:cancel', 'export:list', 'export:reveal', 'export:copy', 'recovery:list', 'recovery:recover', 'recovery:discard', 'dialog:folder',
 ] as const;
 
 const api: Record<string, (...a: unknown[]) => Promise<any>> = {};
