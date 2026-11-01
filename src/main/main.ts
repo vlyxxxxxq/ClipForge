@@ -308,7 +308,7 @@ app.whenReady().then(async () => {
   capture.configure(settings.get().capture);
   library = new LibraryStore(userData, paths.thumbs, { probe, thumbnail: makeThumbnail });
   exporter = new ExportService(paths.exportTmp);
-  exporter.cleanupOrphans();
+  exporter.cleanupOrphans([settings.get().capture.clipsDir, path.join(settings.get().capture.clipsDir, 'Exports')]);
   library.on('changed', () => send('event', { type: 'library-changed', payload: null }));
   capture.on('status', (st: CaptureStatus) => { send('capture-status', st); updateTray(st); });
   capture.on('source-lost', (msg: string) => {
@@ -342,7 +342,7 @@ app.on('before-quit', (e) => {
     try {
       globalShortcut.unregisterAll();
       if (restartTimer) clearTimeout(restartTimer);
-      exporter?.cancelAll();
+      await exporter?.shutdown();
       await capture?.shutdown();
       library?.flush();
     } catch (err: any) { L.error('shutdown: ' + err.message); }

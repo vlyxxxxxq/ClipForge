@@ -90,7 +90,7 @@ export interface ExportOptions {
 export interface ExportJob {
   id: string;
   clipId: string;
-  state: 'running' | 'done' | 'failed' | 'cancelled';
+  state: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
   progress: number; // 0..1, from ffmpeg out_time
   outputPath: string | null;
   error: string | null;

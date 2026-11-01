@@ -20,7 +20,7 @@ const svc = new ExportService(path.join(root, 'tmp'));
 const out = path.join(root, 'out');
 const run = (project, opts) => new Promise(async (resolve) => {
   const job = await svc.start('c', project, opts, out, 60);
-  svc.on('job', (j) => { if (j.id === job.id && j.state !== 'running') resolve(j); });
+  svc.on('job', (j) => { if (j.id === job.id && !['queued', 'running'].includes(j.state)) resolve(j); });
 });
 const probe = (f) => JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_entries', 'format=duration:stream=codec_type,width,height,channels', f]));
 const level = (f) => Number(/mean_volume: (-?[\d.]+)/.exec(execFileSync('ffmpeg', ['-hide_banner', '-i', f, '-af', 'volumedetect', '-f', 'null', '-'], { stdio: ['ignore', 'pipe', 'pipe'] }).toString() + '')?.[1]
@@ -43,7 +43,7 @@ results.gainDb = level(quiet.outputPath) - level(base.outputPath); // expect ~ -
 const before = new Set(fs.readdirSync(out));
 const job = await svc.start('c', p, { ...opts, resolution: 'original', quality: 'ultra', fileName: 'cancel-me' }, out, 60);
 setTimeout(() => svc.cancel(job.id), 700);
-const cancelled = await new Promise((r) => svc.on('job', (j) => { if (j.id === job.id && j.state !== 'running') r(j); }));
+const cancelled = await new Promise((r) => svc.on('job', (j) => { if (j.id === job.id && !['queued', 'running'].includes(j.state)) r(j); }));
 await new Promise((r) => setTimeout(r, 500));
 results.cancel = { state: cancelled.state, newFiles: fs.readdirSync(out).filter((f) => !before.has(f)), tempLeft: fs.readdirSync(path.join(root, 'tmp')), sourceIntact: fs.existsSync(src) };
 console.log(JSON.stringify(results, null, 1));

@@ -264,10 +264,10 @@ export function Editor({ clipId, toast, onBack }: { clipId: string | null; toast
               </select></label>
           </div>
           <p className="muted small">{exportSize.width}×{exportSize.height} · {fmtTime(duration)} · H.264/AAC MP4 · saved to Clips\Exports</p>
-          {job?.state === 'running' ? (
+          {job?.state === 'queued' || job?.state === 'running' ? (
             <div className="export-progress">
               <div className="meter big" role="progressbar" aria-valuenow={Math.round(job.progress * 100)} aria-valuemin={0} aria-valuemax={100}><div style={{ width: `${job.progress * 100}%` }} /></div>
-              <span>{Math.round(job.progress * 100)}%</span>
+              <span>{job.state === 'queued' ? 'Waiting…' : `${Math.round(job.progress * 100)}%`}</span>
               <button className="btn" onClick={() => api.cancelExport(job.id)}>Cancel</button>
             </div>
           ) : <button className="btn primary wide" onClick={startExport}>Export MP4</button>}

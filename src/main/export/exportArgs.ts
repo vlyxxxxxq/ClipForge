@@ -72,6 +72,17 @@ export function buildExportArgs(i: ExportArgInput): { args: string[]; duration: 
   return { args, duration: outputDuration(p), width: W, height: H, hasAudio: tracks.length > 0 };
 }
 
+/** Why a finished encode isn't what was asked for, or null if it's fine. */
+export function checkExportOutput(
+  info: { duration: number; width: number; height: number; audioTracks: string[] },
+  want: { duration: number; width: number; height: number; hasAudio: boolean },
+): string | null {
+  if (Math.abs(info.duration - want.duration) > 0.5) return `Exported duration is ${info.duration.toFixed(2)} s, expected ${want.duration.toFixed(2)} s.`;
+  if (info.width !== want.width || info.height !== want.height) return `Exported size is ${info.width}x${info.height}, expected ${want.width}x${want.height}.`;
+  if (want.hasAudio !== info.audioTracks.length > 0) return want.hasAudio ? 'The exported file has no audio.' : 'The exported file has unexpected audio.';
+  return null;
+}
+
 /** Parse ffmpeg -progress output; returns seconds processed, or null. */
 export function parseProgress(chunk: string): { outTime: number | null; ended: boolean } {
   let outTime: number | null = null;
