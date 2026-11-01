@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildScreenshotArgs } from './capture/captureArgs';
+import { computePeaks, PEAK_SAMPLE_RATE } from '../shared/peaks';
 import { run } from './util';
 import { log } from './logger';
 import type { EncoderInfo, MonitorInfo } from '../shared/types';
@@ -127,6 +128,22 @@ export async function takeScreenshot(monitorIndex: number, dest: string): Promis
     const info = await probe(tmp);
     fs.renameSync(tmp, dest);
     return { width: info.width, height: info.height };
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+}
+
+/** Peak data for one audio track, cached as JSON. */
+export async function makePeaks(src: string, index: number, dest: string): Promise<number[]> {
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  const tmp = dest + '.tmp.raw';
+  try {
+    const r = await run(ffmpegPath, ['-hide_banner', '-v', 'error', '-y', '-i', src, '-map', `0:a:${index}`, '-ac', '1', '-ar', String(PEAK_SAMPLE_RATE), '-f', 's16le', tmp], { timeoutMs: 120000 });
+    if (r.code !== 0 || !fs.existsSync(tmp)) throw new Error(r.stderr.trim() || 'waveform failed');
+    const raw = new Uint8Array(fs.readFileSync(tmp)); // copied, so the samples are correctly aligned
+    const peaks = computePeaks(new Int16Array(raw.buffer, 0, Math.floor(raw.length / 2)));
+    fs.writeFileSync(dest, JSON.stringify(peaks));
+    return peaks;
   } finally {
     fs.rmSync(tmp, { force: true });
   }

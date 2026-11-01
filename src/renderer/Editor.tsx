@@ -6,7 +6,16 @@ import {
   AspectMode, canvasSize, clamp, cropRect, EditProject, markerTimes, newId, outputDuration, outputToSource, removeSegment, setTrimEnd, setTrimStart,
   sourceToOutput, splitAt, TextOverlay, toggleMarker,
 } from '../shared/project';
+import { waveformColumns } from '../shared/peaks';
+import { EXPORT_PRESETS, ExportPreset, presetMatches } from '../shared/exportPresets';
 import type { ExportJob, ExportOptions } from '../shared/types';
+
+const OPTS_KEY = 'clipforge.exportOptions';
+function rememberedOptions(): ExportOptions {
+  const base: ExportOptions = { resolution: '1080p', fps: 'source', quality: 'high', fileName: '' };
+  try { return { ...base, ...JSON.parse(localStorage.getItem(OPTS_KEY) ?? '{}'), fileName: '' }; } catch { return base; }
+}
+const MAX_ZOOM = 16;
 
 interface Loaded { pressMarker: number | null; fps: number; filmstrip: string | null; audio: (string | null)[]; videoUrl: string }
 
@@ -39,7 +48,10 @@ export function Editor({ clipId, toast, onBack }: { clipId: string | null; toast
   const [selSeg, setSelSeg] = useState<string | null>(null);
   const [selText, setSelText] = useState<string | null>(null);
   const [job, setJob] = useState<ExportJob | null>(null);
-  const [opts, setOpts] = useState<ExportOptions>({ resolution: '1080p', fps: 'source', quality: 'high', fileName: '' });
+  const [opts, setOpts] = useState<ExportOptions>(rememberedOptions);
+  const [peaks, setPeaks] = useState<(number[] | null)[]>([]);
+  const [zoom, setZoom] = useState(1);
+  const [safeArea, setSafeArea] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRefs = useRef<(HTMLAudioElement | null)[]>([]);
   const gains = useRef<GainNode[]>([]);
@@ -51,7 +63,7 @@ export function Editor({ clipId, toast, onBack }: { clipId: string | null; toast
 
   useEffect(() => {
     if (!clipId) return;
-    setError(null); setLoaded(null); setJob(null);
+    setError(null); setLoaded(null); setJob(null); setPeaks([]); setZoom(1);
     let current = true; // a slower load for a previous clip must not replace this one
     api.loadProject(clipId).then((r) => {
       if (!current) return;
@@ -61,6 +73,7 @@ export function Editor({ clipId, toast, onBack }: { clipId: string | null; toast
       setOpts((o) => ({ ...o, fileName: `${r.project.source.path.split(/[\\/]/).pop()!.replace(/\.\w+$/, '')} edit` }));
       setT(0); tRef.current = 0;
     }).catch((e) => { if (current) setError(e.message); });
+    api.waveforms(clipId).then((w) => { if (current) setPeaks(w); }).catch(() => {}); // the editor works fine without it
     // An export keeps running while you're elsewhere, so pick its progress back up.
     api.listExports().then((jobs) => {
       const active = jobs.filter((j) => j.clipId === clipId && (j.state === 'queued' || j.state === 'running')).pop();
@@ -73,6 +86,10 @@ export function Editor({ clipId, toast, onBack }: { clipId: string | null; toast
     });
     return () => { current = false; off(); saver.flush(); };
   }, [clipId]);
+
+  useEffect(() => {
+    try { const { fileName: _name, ...rest } = opts; localStorage.setItem(OPTS_KEY, JSON.stringify(rest)); } catch { /* only a convenience */ }
+  }, [opts.resolution, opts.fps, opts.quality]);
 
   // Persist the project (debounced) whenever it changes.
   useEffect(() => { if (p) saver.schedule(p); }, [p]);
@@ -175,6 +192,8 @@ export function Editor({ clipId, toast, onBack }: { clipId: string | null; toast
       else if (e.key === 'ArrowRight') { e.preventDefault(); seek(tRef.current + (e.shiftKey ? 1 : frame)); }
       else if (e.key.toLowerCase() === 'i') { h.set(setTrimStart(pr, outputToSource(pr, tRef.current).time)); seek(0); }
       else if (e.key.toLowerCase() === 'o') h.set(setTrimEnd(pr, outputToSource(pr, tRef.current).time));
+      else if (e.key === '=' || e.key === '+') setZoom((z) => Math.min(MAX_ZOOM, z * 1.5));
+      else if (e.key === '-') setZoom((z) => Math.max(1, z / 1.5));
       else if (e.key.toLowerCase() === 'm') h.set(toggleMarker(pr, outputToSource(pr, tRef.current).time));
       else if (e.key === ',' || e.key === '.') {
         const times = markerTimes(pr, loaded?.pressMarker ?? null).map((m) => m.time);
@@ -198,6 +217,11 @@ export function Editor({ clipId, toast, onBack }: { clipId: string | null; toast
   const setText = (id: string, patch: Partial<TextOverlay>, coalesce = true) => h.set((q) => ({ ...q, texts: q.texts.map((x) => (x.id === id ? { ...x, ...patch } : x)) }), coalesce);
   const exportSize = canvasSize(p, opts.resolution);
 
+  const applyPreset = (pre: ExportPreset) => {
+    if (pre.aspect && pre.aspect !== p.aspect) h.set({ ...p, aspect: pre.aspect });
+    setOpts({ ...opts, resolution: pre.resolution, fps: pre.fps, quality: pre.quality });
+  };
+
   const startExport = async () => {
     try { setJob(await api.startExport(p, { ...opts, fileName: opts.fileName || 'export' }, loaded.fps)); }
     catch (e: any) { toast('error', e.message); }
@@ -206,7 +230,7 @@ export function Editor({ clipId, toast, onBack }: { clipId: string | null; toast
   return (
     <div className="editor">
       <div className="editor-main">
-        <Preview p={p} t={t} videoUrl={loaded.videoUrl} videoRef={videoRef} selText={selText} onSelectText={setSelText}
+        <Preview p={p} t={t} safeArea={safeArea && p.aspect === '9:16'} videoUrl={loaded.videoUrl} videoRef={videoRef} selText={selText} onSelectText={setSelText}
           onPan={(dx, dy) => h.set((q) => ({ ...q, framing: { ...q.framing, offsetX: clamp(q.framing.offsetX + dx, -1, 1), offsetY: clamp(q.framing.offsetY + dy, -1, 1) } }), true)}
           onMoveText={(id, x, y) => setText(id, { x, y })} />
         {loaded.audio.map((src, i) => src && <audio key={src} ref={(el) => { audioRefs.current[i] = el; }} src={src} crossOrigin="anonymous" preload="auto" />)}
@@ -223,11 +247,11 @@ export function Editor({ clipId, toast, onBack }: { clipId: string | null; toast
           <button className="btn icon" disabled={!h.canUndo} onClick={h.undo} aria-label="Undo" title="Undo (Ctrl+Z)">↶</button>
           <button className="btn icon" disabled={!h.canRedo} onClick={h.redo} aria-label="Redo" title="Redo (Ctrl+Y)">↷</button>
         </div>
-        <Timeline p={p} t={t} pressMarker={loaded.pressMarker} filmstrip={loaded.filmstrip} selSeg={selSeg} selText={selText} onSeek={(x) => { pause(); seek(x); }}
+        <Timeline p={p} t={t} fps={loaded.fps} zoom={zoom} onZoom={setZoom} peaks={peaks} pressMarker={loaded.pressMarker} filmstrip={loaded.filmstrip} selSeg={selSeg} selText={selText} onSeek={(x) => { pause(); seek(x); }}
           onSelectSeg={(id) => { setSelSeg(id); setSelText(null); }} onSelectText={(id) => { setSelText(id); setSelSeg(null); }}
           onTrim={(edge, src) => h.set(edge === 'start' ? setTrimStart(p, src) : setTrimEnd(p, src), true)}
           onTextTime={(id, start, end) => setText(id, { start, end })} />
-        <p className="hint">Space play/pause · S split · Delete remove · I/O trim to playhead · M marker · ,/. previous/next marker · ←/→ frame step (Shift: 1s) · Ctrl+Z/Y undo/redo · drag the preview to reposition</p>
+        <p className="hint">Space play/pause · S split · Delete remove · I/O trim to playhead · M marker · ,/. previous/next marker · +/- zoom timeline · ←/→ frame step (Shift: 1s) · Ctrl+Z/Y undo/redo · drag the preview to reposition</p>
       </div>
       <aside className="inspector">
         <section>
@@ -240,7 +264,10 @@ export function Editor({ clipId, toast, onBack }: { clipId: string | null; toast
           <Slider label="Zoom" min={1} max={4} step={0.01} value={p.framing.zoom} fmt={(v) => `${Math.round(v * 100)}%`} onChange={(v) => h.set({ ...p, framing: { ...p.framing, zoom: v } }, true)} />
           <Slider label="Horizontal" min={-1} max={1} step={0.01} value={p.framing.offsetX} fmt={(v) => v.toFixed(2)} onChange={(v) => h.set({ ...p, framing: { ...p.framing, offsetX: v } }, true)} />
           <Slider label="Vertical" min={-1} max={1} step={0.01} value={p.framing.offsetY} fmt={(v) => v.toFixed(2)} onChange={(v) => h.set({ ...p, framing: { ...p.framing, offsetY: v } }, true)} />
-          <button className="btn small" onClick={() => h.set({ ...p, framing: { zoom: 1, offsetX: 0, offsetY: 0 } })}>Reset framing</button>
+          <div className="row">
+            <button className="btn small" onClick={() => h.set({ ...p, framing: { zoom: 1, offsetX: 0, offsetY: 0 } })}>Reset framing</button>
+            {p.aspect === '9:16' && <button className={`btn small ${safeArea ? 'toggled' : ''}`} aria-pressed={safeArea} onClick={() => setSafeArea(!safeArea)} title="Shades roughly where apps put buttons and captions. It varies by app and isn't in the export.">Safe area</button>}
+          </div>
         </section>
         <section>
           <h3>Audio</h3>
@@ -269,6 +296,9 @@ export function Editor({ clipId, toast, onBack }: { clipId: string | null; toast
         )}
         <section>
           <h3>Export</h3>
+          <div className="presets" role="group" aria-label="Export presets">
+            {EXPORT_PRESETS.map((pre) => <button key={pre.id} className={`btn small ${presetMatches(pre, p, opts) ? 'toggled' : ''}`} title={pre.hint} onClick={() => applyPreset(pre)}>{pre.label}</button>)}
+          </div>
           <label className="field"><span>File name</span><input value={opts.fileName} onChange={(e) => setOpts({ ...opts, fileName: e.target.value })} /></label>
           <div className="row">
             <label className="field compact"><span>Resolution</span>
@@ -321,8 +351,8 @@ function TrackControl({ label, volume, muted, onVolume, onMute }: { label: strin
 }
 
 /** Preview of the output frame: same crop math as the exporter, rendered with CSS. */
-function Preview({ p, t, videoUrl, videoRef, selText, onSelectText, onPan, onMoveText }: {
-  p: EditProject; t: number; videoUrl: string; videoRef: React.RefObject<HTMLVideoElement>; selText: string | null;
+function Preview({ p, t, safeArea, videoUrl, videoRef, selText, onSelectText, onPan, onMoveText }: {
+  p: EditProject; t: number; safeArea: boolean; videoUrl: string; videoRef: React.RefObject<HTMLVideoElement>; selText: string | null;
   onSelectText: (id: string | null) => void; onPan: (dx: number, dy: number) => void; onMoveText: (id: string, x: number, y: number) => void;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
@@ -374,21 +404,81 @@ function Preview({ p, t, videoUrl, videoRef, selText, onSelectText, onPan, onMov
             {x.text}
           </div>
         ))}
+        {safeArea && <div className="safe-area" aria-hidden><i className="top" /><i className="bottom" /><i className="right" /></div>}
       </div>
     </div>
   );
 }
 
-function Timeline({ p, t, pressMarker, filmstrip, selSeg, selText, onSeek, onSelectSeg, onSelectText, onTrim, onTextTime }: {
-  p: EditProject; t: number; pressMarker: number | null; filmstrip: string | null; selSeg: string | null; selText: string | null; onSeek: (t: number) => void;
+const WAVE_COLORS = ['#ff7a5c', '#7cb7ff'];
+
+/** Each audio track's waveform along the output timeline, redrawn as the edit changes. */
+function Waveform({ p, peaks }: { p: EditProject; peaks: (number[] | null)[] }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setWidth(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(() => {
+    const c = ref.current;
+    const ctx = c?.getContext('2d');
+    if (!c || !ctx || !width) return;
+    const columns = Math.min(width, 8000);
+    const h = c.clientHeight;
+    c.width = columns; c.height = h;
+    ctx.clearRect(0, 0, columns, h);
+    const muted = [p.audio.desktopMuted, p.audio.micMuted];
+    peaks.slice(0, 2).forEach((track, k) => {
+      if (!track) return;
+      ctx.fillStyle = WAVE_COLORS[k];
+      ctx.globalAlpha = muted[k] ? 0.2 : 0.75;
+      waveformColumns(p, track, columns).forEach((v, x) => {
+        const bar = Math.max(1, Math.sqrt(v) * h); // square root keeps quiet audio visible
+        ctx.fillRect(x, (h - bar) / 2, 1, bar);
+      });
+    });
+  }, [width, peaks, p.segments, p.audio.desktopMuted, p.audio.micMuted]);
+  return <canvas ref={ref} className="waveform" aria-hidden />;
+}
+
+function Timeline({ p, t, fps, zoom, onZoom, peaks, pressMarker, filmstrip, selSeg, selText, onSeek, onSelectSeg, onSelectText, onTrim, onTextTime }: {
+  p: EditProject; t: number; fps: number; zoom: number; onZoom: (z: number) => void; peaks: (number[] | null)[]; pressMarker: number | null; filmstrip: string | null; selSeg: string | null; selText: string | null; onSeek: (t: number) => void;
   onSelectSeg: (id: string) => void; onSelectText: (id: string) => void; onTrim: (edge: 'start' | 'end', src: number) => void;
   onTextTime: (id: string, start: number, end: number) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
   const duration = outputDuration(p);
   const srcDur = p.source.duration;
   const toT = (clientX: number) => { const r = ref.current!.getBoundingClientRect(); return clamp(((clientX - r.left) / r.width) * duration, 0, duration); };
   const pct = (v: number) => `${(v / duration) * 100}%`;
+  const setZoom = (z: number) => onZoom(clamp(z, 1, MAX_ZOOM));
+
+  // Ctrl+wheel zooms. It needs a non-passive listener to stop the page from zooming instead.
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey) { e.preventDefault(); onZoom(clamp(zoomRef.current * (e.deltaY < 0 ? 1.25 : 0.8), 1, MAX_ZOOM)); }
+      else if (zoomRef.current > 1 && e.deltaX === 0) { e.preventDefault(); el.scrollLeft += e.deltaY; }
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [onZoom]);
+
+  // Keep the playhead in view while zoomed in.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || zoom <= 1 || !duration) return;
+    const x = (t / duration) * el.scrollWidth;
+    if (x < el.scrollLeft || x > el.scrollLeft + el.clientWidth - 20) el.scrollLeft = x - el.clientWidth * 0.25;
+  }, [t, zoom, duration]);
 
   const dragging = useRef<null | ((x: number) => void)>(null);
   const begin = (e: React.PointerEvent, fn: (x: number) => void) => {
@@ -407,38 +497,57 @@ function Timeline({ p, t, pressMarker, filmstrip, selSeg, selText, onSeek, onSel
     const origin = edge === 'start' ? seg.start : seg.end;
     return (x: number) => onTrim(edge, clamp(origin + (x - startX) / pxPerSec, 0, srcDur));
   };
+  const trimKey = (edge: 'start' | 'end', value: number) => (e: React.KeyboardEvent) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault(); e.stopPropagation(); // the arrows move this handle, not the playhead
+    const step = (e.shiftKey ? 1 : 1 / (fps || 60)) * (e.key === 'ArrowLeft' ? -1 : 1);
+    onTrim(edge, clamp(value + step, 0, srcDur));
+  };
 
   let acc = 0;
   return (
     <div className="timeline" onPointerMove={move} onPointerUp={end}>
-      <div className="ruler" ref={ref} onPointerDown={(e) => begin(e, (x) => onSeek(toT(x)))}>
-        {p.segments.map((s, i) => {
-          const left = acc; acc += s.end - s.start;
-          return (
-            <div key={s.id} className={`segment ${selSeg === s.id ? 'sel' : ''}`} style={{ left: pct(left), width: pct(s.end - s.start) }}
-              onPointerDown={(e) => { onSelectSeg(s.id); begin(e, (x) => onSeek(toT(x))); onSeek(toT(e.clientX)); }}>
-              {filmstrip && <div className="strip" style={{ backgroundImage: `url("${filmstrip}")`, backgroundSize: `${(srcDur / (s.end - s.start)) * 100}% 100%`, backgroundPosition: `${(s.start / Math.max(0.001, srcDur - (s.end - s.start))) * 100}% 0` }} />}
-              {i === 0 && <div className="handle start" role="slider" aria-label="Trim start" aria-valuenow={s.start} tabIndex={0} onPointerDown={(e) => begin(e, trimDrag('start'))} />}
-              {i === p.segments.length - 1 && <div className="handle end" role="slider" aria-label="Trim end" aria-valuenow={s.end} tabIndex={0} onPointerDown={(e) => begin(e, trimDrag('end'))} />}
-            </div>
-          );
-        })}
-        {markerTimes(p, pressMarker).map((m, i) => (
-          <div key={i} className={`marker ${m.press ? 'press' : ''}`} style={{ left: pct(m.time) }} title={m.press ? 'About where you pressed the hotkey' : 'Marker'} />
-        ))}
-        <div className="playhead" style={{ left: pct(t) }} />
+      <div className="timeline-tools">
+        <span className="muted small">Timeline</span>
+        <div className="spacer" />
+        <button className="btn small" disabled={zoom <= 1} onClick={() => setZoom(zoom / 1.5)} aria-label="Zoom timeline out" title="Zoom out (-)">−</button>
+        <span className="muted small zoom-value">{Math.round(zoom * 100)}%</span>
+        <button className="btn small" disabled={zoom >= MAX_ZOOM} onClick={() => setZoom(zoom * 1.5)} aria-label="Zoom timeline in" title="Zoom in (+), or Ctrl+scroll">+</button>
+        <button className="btn small" disabled={zoom === 1} onClick={() => setZoom(1)}>Fit</button>
       </div>
-      <div className="text-lane">
-        {p.texts.map((x) => (
-          <div key={x.id} className={`text-bar ${selText === x.id ? 'sel' : ''}`} style={{ left: pct(x.start), width: pct(Math.max(0.05, x.end - x.start)) }}
-            onPointerDown={(e) => {
-              onSelectText(x.id);
-              const r = ref.current!.getBoundingClientRect(), sx = e.clientX, len = x.end - x.start;
-              begin(e, (cx) => { const s = clamp(x.start + ((cx - sx) / r.width) * duration, 0, duration - len); onTextTime(x.id, s, s + len); });
-            }}>
-            {x.text || 'Text'}
+      <div className="timeline-scroll" ref={scroller}>
+        <div className="timeline-inner" style={{ width: `${zoom * 100}%` }}>
+          <div className="ruler" ref={ref} onPointerDown={(e) => begin(e, (x) => onSeek(toT(x)))}>
+            {p.segments.map((s, i) => {
+              const left = acc; acc += s.end - s.start;
+              return (
+                <div key={s.id} className={`segment ${selSeg === s.id ? 'sel' : ''}`} style={{ left: pct(left), width: pct(s.end - s.start) }}
+                  onPointerDown={(e) => { onSelectSeg(s.id); begin(e, (x) => onSeek(toT(x))); onSeek(toT(e.clientX)); }}>
+                  {filmstrip && <div className="strip" style={{ backgroundImage: `url("${filmstrip}")`, backgroundSize: `${(srcDur / (s.end - s.start)) * 100}% 100%`, backgroundPosition: `${(s.start / Math.max(0.001, srcDur - (s.end - s.start))) * 100}% 0` }} />}
+                  {i === 0 && <div className="handle start" role="slider" aria-label="Trim start" aria-valuemin={0} aria-valuemax={srcDur} aria-valuenow={s.start} tabIndex={0} onKeyDown={trimKey('start', s.start)} onPointerDown={(e) => begin(e, trimDrag('start'))} />}
+                  {i === p.segments.length - 1 && <div className="handle end" role="slider" aria-label="Trim end" aria-valuemin={0} aria-valuemax={srcDur} aria-valuenow={s.end} tabIndex={0} onKeyDown={trimKey('end', s.end)} onPointerDown={(e) => begin(e, trimDrag('end'))} />}
+                </div>
+              );
+            })}
+            {markerTimes(p, pressMarker).map((m, i) => (
+              <div key={i} className={`marker ${m.press ? 'press' : ''}`} style={{ left: pct(m.time) }} title={m.press ? 'About where you pressed the hotkey' : 'Marker'} />
+            ))}
+            <div className="playhead" style={{ left: pct(t) }} />
           </div>
-        ))}
+          {peaks.some(Boolean) && <Waveform p={p} peaks={peaks} />}
+          <div className="text-lane">
+            {p.texts.map((x) => (
+              <div key={x.id} className={`text-bar ${selText === x.id ? 'sel' : ''}`} style={{ left: pct(x.start), width: pct(Math.max(0.05, x.end - x.start)) }}
+                onPointerDown={(e) => {
+                  onSelectText(x.id);
+                  const r = ref.current!.getBoundingClientRect(), sx = e.clientX, len = x.end - x.start;
+                  begin(e, (cx) => { const s = clamp(x.start + ((cx - sx) / r.width) * duration, 0, duration - len); onTextTime(x.id, s, s + len); });
+                }}>
+                {x.text || 'Text'}
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );

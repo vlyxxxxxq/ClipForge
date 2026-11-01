@@ -35,6 +35,7 @@ export const api = {
   relink: (id: string) => c('library:relink', id),
   importClips: () => c('library:import'),
   loadProject: (clipId: string): Promise<{ project: EditProject; pressMarker: number | null; fps: number; filmstrip: string | null; audio: (string | null)[]; videoUrl: string; notices: string[] }> => c('editor:load', clipId),
+  waveforms: (clipId: string): Promise<(number[] | null)[]> => c('editor:waveform', clipId),
   saveProject: (p: EditProject) => c('editor:save', p),
   startExport: (p: EditProject, o: ExportOptions, fps: number): Promise<ExportJob> => c('export:start', p, o, fps),
   cancelExport: (id: string) => c('export:cancel', id),

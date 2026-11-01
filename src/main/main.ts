@@ -3,13 +3,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { initLogger, log, logFilePath } from './logger';
-import { initMedia, probe, makeThumbnail, makeFilmstrip, extractAudioTrack, takeScreenshot } from './media';
+import { initMedia, probe, makeThumbnail, makeFilmstrip, extractAudioTrack, makePeaks, takeScreenshot } from './media';
 import { CaptureService } from './capture/captureService';
 import { LibraryStore } from './library/libraryStore';
 import { ExportService } from './export/exportService';
 import { HotkeyAction, planHotkeys } from './hotkeys';
 import { defaultSettings, SettingsStore } from './settings';
-import { isInside, loadDocument, safeRemove, writeJsonAtomic, uniquePath } from './util';
+import { isInside, loadDocument, readJson, safeRemove, writeJsonAtomic, uniquePath } from './util';
 import { createProject, EditProject, validateProject } from '../shared/project';
 import type { CaptureStatus, ExportOptions, Settings } from '../shared/types';
 
@@ -180,6 +180,23 @@ async function saveClip(duration?: number) {
 
 const projectFile = (clipId: string) => path.join(paths.projects, `${clipId.replace(/[^\w-]/g, '')}.json`);
 
+const cacheDirFor = (clipId: string, st: fs.Stats) => path.join(paths.cache, clipId, `${st.size}-${Math.round(st.mtimeMs)}`);
+
+/** Waveform data per audio track, indexed by track; null where a track couldn't be read. */
+async function loadWaveforms(clipId: string): Promise<(number[] | null)[]> {
+  const clip = library.get(clipId);
+  if (!clip || !fs.existsSync(clip.filePath)) throw new Error('Clip not found');
+  const cacheDir = cacheDirFor(clipId, fs.statSync(clip.filePath));
+  const info = await probe(clip.filePath);
+  const out: (number[] | null)[] = [];
+  for (let k = 0; k < info.audioTracks.length; k++) {
+    const f = path.join(cacheDir, `peaks${k}.json`);
+    const cached = readJson<number[] | null>(f, null);
+    out.push(Array.isArray(cached) ? cached : await makePeaks(clip.filePath, k, f).catch((e) => { L.warn('waveform: ' + e.message); return null; }));
+  }
+  return out;
+}
+
 async function loadProject(clipId: string) {
   const clip = library.get(clipId);
   if (!clip) throw new Error('Clip not found');
@@ -203,7 +220,7 @@ async function loadProject(clipId: string) {
 
   // Caches are tied to this exact version of the file, so a relinked or replaced clip never shows old media.
   const clipCache = path.join(paths.cache, clipId);
-  const cacheDir = path.join(clipCache, `${st.size}-${Math.round(st.mtimeMs)}`);
+  const cacheDir = cacheDirFor(clipId, st);
   fs.mkdirSync(cacheDir, { recursive: true });
   for (const old of fs.readdirSync(clipCache)) if (path.join(clipCache, old) !== cacheDir) safeRemove(paths.cache, path.join(clipCache, old));
   const strip = path.join(cacheDir, 'filmstrip.jpg');
@@ -310,6 +327,7 @@ function registerIpc() {
     for (const f of r.canceled ? [] : r.filePaths) await library.addFile(f, 'import');
   });
   h('editor:load', (clipId: string) => loadProject(str(clipId)));
+  h('editor:waveform', (clipId: string) => loadWaveforms(str(clipId)));
   h('editor:save', (project: unknown) => {
     if (!validateProject(project)) throw new Error('Invalid project');
     const clip = library.get(project.clipId);

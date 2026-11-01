@@ -133,10 +133,20 @@ input[type=color] { width: 44px; height: 30px; padding: 0; border: 1px solid var
 .frame:active { cursor: grabbing; }
 .frame video { pointer-events: none; }
 .overlay-text { position: absolute; transform: translate(-50%, -50%); font-family: "Segoe UI", sans-serif; font-weight: 700; white-space: pre; line-height: 1.15; cursor: move; paint-order: stroke fill; }
+.safe-area { position: absolute; inset: 0; pointer-events: none; }
+.safe-area i { position: absolute; background: #ff5a3630; }
+.safe-area .top { left: 0; right: 0; top: 0; height: 12%; }
+.safe-area .bottom { left: 0; right: 0; bottom: 0; height: 22%; }
+.safe-area .right { right: 0; top: 12%; bottom: 22%; width: 14%; }
 .overlay-text.sel { outline: 1px dashed #fff9; outline-offset: 4px; }
 .transport { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .timecode { font-variant-numeric: tabular-nums; font-family: Consolas, monospace; color: var(--muted); }
 .timeline { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.timeline-tools { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.zoom-value { min-width: 42px; text-align: center; font-variant-numeric: tabular-nums; }
+.timeline-scroll { overflow-x: auto; overflow-y: hidden; padding-top: 8px; }
+.timeline-inner { position: relative; min-width: 100%; }
+.waveform { display: block; width: 100%; height: 38px; margin-top: 4px; background: #0003; border-radius: 4px; }
 .ruler { position: relative; height: 64px; cursor: pointer; }
 .segment { position: absolute; top: 0; bottom: 0; border-radius: 6px; overflow: hidden; border: 2px solid #ffffff22; background: #222733; box-sizing: border-box; }
 .segment + .segment { margin-left: 1px; }
@@ -144,6 +154,7 @@ input[type=color] { width: 44px; height: 30px; padding: 0; border: 1px solid var
 .strip { position: absolute; inset: 0; background-repeat: no-repeat; opacity: .85; }
 .handle { position: absolute; top: 0; bottom: 0; width: 12px; background: var(--accent); cursor: ew-resize; z-index: 2; }
 .handle.start { left: 0; border-radius: 4px 0 0 4px; } .handle.end { right: 0; border-radius: 0 4px 4px 0; }
+.handle:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
 .handle::after { content: ''; position: absolute; left: 5px; top: 35%; bottom: 35%; width: 2px; background: #fff9; }
 .playhead { position: absolute; top: -6px; bottom: -6px; width: 2px; background: #fff; transform: translateX(-1px); pointer-events: none; z-index: 3; box-shadow: 0 0 4px #000; }
 .marker { position: absolute; top: -6px; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 8px solid #ffc23d; transform: translateX(-5px); z-index: 3; pointer-events: none; }
@@ -158,5 +169,6 @@ input[type=color] { width: 44px; height: 30px; padding: 0; border: 1px solid var
 .slider { display: grid; grid-template-columns: 82px 1fr 46px; gap: 8px; align-items: center; font-size: 13px; }
 .slider span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .slider output { text-align: right; font-variant-numeric: tabular-nums; }
 .track { display: grid; grid-template-columns: 64px 1fr; gap: 8px; align-items: center; }
+.presets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; } .presets .btn { padding: 4px 0; overflow: hidden; text-overflow: ellipsis; }
 .export-progress { display: flex; gap: 10px; align-items: center; }
 textarea { resize: vertical; }
