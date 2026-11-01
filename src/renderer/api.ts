@@ -14,7 +14,7 @@ export type ClipView = ClipRecord & { thumbnailUrl: string | null; videoUrl: str
 const c = (ch: string, ...a: unknown[]) => window.clipforge.call(ch, ...a);
 
 export const api = {
-  info: (): Promise<{ version: string; mediaError: string | null; logFile: string | null }> => c('app:info'),
+  info: (): Promise<{ version: string; mediaError: string | null; logFile: string | null; dataNotices: string[] }> => c('app:info'),
   openLogs: () => c('app:openLogs'),
   quit: () => c('app:quit'),
   getSettings: (): Promise<Settings> => c('settings:get'),

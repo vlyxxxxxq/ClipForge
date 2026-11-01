@@ -57,14 +57,89 @@ describe('library persistence', () => {
     expect(lib.get(rec.id)!.status).toBe('corrupt');
   });
 
-  it('tolerates a corrupted library file', () => {
+  it('keeps a copy of a damaged library file and says so', () => {
     const d = tmp();
     fs.writeFileSync(path.join(d, 'library.json'), '{not json');
-    expect(new LibraryStore(d, d, media).list()).toEqual([]);
+    const lib = new LibraryStore(d, d, media);
+    expect(lib.list()).toEqual([]);
+    expect(lib.notice).toContain('damaged');
+    const copy = fs.readdirSync(d).find((f) => f.includes('.damaged-'))!;
+    expect(fs.readFileSync(path.join(d, copy), 'utf8')).toBe('{not json');
+  });
+
+  it.each([['null'], ['{"version":1,"clips":{}}'], ['[]'], ['42'], ['']])('does not crash on %s', (content) => {
+    const d = tmp();
+    fs.writeFileSync(path.join(d, 'library.json'), content);
+    const lib = new LibraryStore(d, d, media);
+    expect(lib.list()).toEqual([]);
+    expect(lib.notice).toContain('damaged');
+  });
+
+  it('skips invalid records and keeps the good ones', () => {
+    const d = tmp();
+    fs.writeFileSync(path.join(d, 'library.json'), JSON.stringify({ version: 1, clips: [null, { id: 'a' }, { id: 'b', filePath: 'C:/b.mp4' }, { id: 3, filePath: 'x' }] }));
+    const lib = new LibraryStore(d, d, media);
+    expect(lib.list().map((c) => c.id)).toEqual(['b']);
+    expect(lib.notice).toBeNull();
+  });
+
+  it('restores the last good copy when the file is damaged', () => {
+    const d = tmp();
+    const good = { version: 1, clips: [{ id: 'old', filePath: 'C:/old.mp4' }] };
+    fs.writeFileSync(path.join(d, 'library.json'), JSON.stringify(good));
+    const first = new LibraryStore(d, d, media);
+    first.patch('old', { title: 'kept' });
+    first.flush();
+    fs.writeFileSync(path.join(d, 'library.json'), 'garbage');
+    const lib = new LibraryStore(d, d, media);
+    expect(lib.list().map((c) => c.id)).toEqual(['old']);
+    expect(lib.notice).toContain('Restored');
+  });
+
+  it('never overwrites a library from a newer version', () => {
+    const d = tmp();
+    const newer = JSON.stringify({ version: 99, clips: [{ id: 'x', filePath: 'C:/x.mp4' }], future: true });
+    fs.writeFileSync(path.join(d, 'library.json'), newer);
+    const lib = new LibraryStore(d, d, media);
+    expect(lib.notice).toContain('newer version');
+    lib.flush();
+    expect(fs.readFileSync(path.join(d, 'library.json'), 'utf8')).toBe(newer);
+  });
+
+  it('reports a failed save and succeeds on retry', () => {
+    const d = tmp();
+    const lib = new LibraryStore(d, d, media);
+    const failed: string[] = [];
+    lib.on('save-failed', (m) => failed.push(m));
+    fs.mkdirSync(path.join(d, 'library.json')); // something blocks the file
+    lib.flush();
+    expect(failed).toHaveLength(1);
+    fs.rmdirSync(path.join(d, 'library.json'));
+    lib.flush();
+    expect(JSON.parse(fs.readFileSync(path.join(d, 'library.json'), 'utf8')).version).toBe(1);
+    expect(failed).toHaveLength(1);
   });
 });
 
 describe('settings persistence', () => {
+  it('uses defaults and says so when the file is damaged', () => {
+    const d = tmp();
+    const file = path.join(d, 'settings.json');
+    fs.writeFileSync(file, 'null');
+    const s = new SettingsStore(file, defaultSettings('C:\\Videos'));
+    expect(s.get().capture.hotkey).toBe('F8');
+    expect(s.notice).toContain('damaged');
+  });
+
+  it('keeps the settings in effect when saving fails', () => {
+    const d = tmp();
+    const file = path.join(d, 'settings.json');
+    const s = new SettingsStore(file, defaultSettings('C:\\Videos'));
+    fs.mkdirSync(file);
+    expect(() => s.set({ capture: { hotkey: 'F9' } })).toThrow();
+    expect(s.get().capture.hotkey).toBe('F8');
+  });
+
   it('validates and persists settings', () => {
     const d = tmp();
     const file = path.join(d, 'settings.json');

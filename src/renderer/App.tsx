@@ -18,6 +18,7 @@ export function App() {
   const [editing, setEditing] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [mediaError, setMediaError] = useState<string | null>(null);
+  const [dataNotices, setDataNotices] = useState<string[]>([]);
 
   const toast = useCallback((kind: Toast['kind'], text: string) => {
     const id = ++toastId;
@@ -28,11 +29,12 @@ export function App() {
   useEffect(() => {
     api.status().then(setStatus);
     api.getSettings().then(setSettings);
-    api.info().then((i) => setMediaError(i.mediaError));
+    api.info().then((i) => { setMediaError(i.mediaError); setDataNotices(i.dataNotices); });
     const offS = api.onStatus(setStatus);
     const offE = api.onEvent((e) => {
       if (e.type === 'clip-saved') toast('ok', `Clip saved (${Math.round((e.payload as any).durationSec)}s)`);
       if (e.type === 'clip-save-failed') toast('error', `Clip not saved: ${e.payload}`);
+      if (e.type === 'library-save-failed') toast('error', `Library changes couldn't be saved yet, still trying: ${e.payload}`);
     });
     return () => { offS(); offE(); };
   }, [toast]);
@@ -70,6 +72,7 @@ export function App() {
       <main className="content">
         <CaptureBar status={status} settings={settings} onSettings={updateSettings} toast={toast} onOpenCapture={() => setPage('capture')} />
         {mediaError && <div className="banner error" role="alert">{mediaError}</div>}
+        {dataNotices.map((n) => <div key={n} className="banner warn" role="alert">{n}</div>)}
         <div className="page">
           {page === 'library' && <Library onEdit={openEditor} toast={toast} status={status} />}
           {page === 'editor' && <Editor clipId={editing} toast={toast} onBack={() => setPage('library')} />}

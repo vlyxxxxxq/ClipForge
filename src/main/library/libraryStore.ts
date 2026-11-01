@@ -3,11 +3,12 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { readJson, writeJsonAtomic } from '../util';
+import { loadDocument, writeJsonWithBackup } from '../util';
 import { log } from '../logger';
 import type { ClipRecord } from '../../shared/types';
 
 const L = log('library');
+const RETRY_SAVE_MS = 5000;
 
 export interface MediaOps {
   probe(file: string): Promise<{ duration: number; width: number; height: number; fps: number; audioTracks: string[] }>;
@@ -22,12 +23,17 @@ export class LibraryStore extends EventEmitter {
   private saveTimer: NodeJS.Timeout | null = null;
   private thumbQueue: string[] = [];
   private thumbBusy = false;
+  private readOnly = false;
+  /** Set when the library file had a problem at startup. */
+  readonly notice: string | null;
 
   constructor(private dataDir: string, private thumbDir: string, private media: MediaOps) {
     super();
     this.file = path.join(dataDir, 'library.json');
-    const data = readJson<LibraryFile>(this.file, { version: 1, clips: [] });
-    for (const c of data.clips ?? []) if (c?.id && c.filePath) this.clips.set(c.id, c);
+    const doc = loadDocument<LibraryFile>(this.file, 'library', 1, (raw) => (Array.isArray(raw?.clips) ? raw : null));
+    this.notice = doc.notice;
+    this.readOnly = doc.readOnly;
+    for (const c of doc.value?.clips ?? []) if (typeof c?.id === 'string' && typeof c.filePath === 'string') this.clips.set(c.id, c);
   }
 
   list(): ClipRecord[] { return [...this.clips.values()]; }
@@ -106,6 +112,7 @@ export class LibraryStore extends EventEmitter {
           }
           const thumb = path.join(this.thumbDir, `${id}.jpg`);
           await this.media.thumbnail(c.filePath, thumb, Math.min(info.durationSec * 0.3, 5));
+          if (this.clips.get(id)?.filePath !== c.filePath) continue; // relinked meanwhile; that file has its own task
           this.patch(id, { ...info, sizeBytes: st.size, thumbnail: thumb, status: 'ok' });
         } catch (e: any) {
           L.warn(`thumbnail/probe failed for ${id}: ${e.message?.slice(0, 200)}`);
@@ -123,6 +130,14 @@ export class LibraryStore extends EventEmitter {
 
   flush() {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
-    writeJsonAtomic(this.file, { version: 1, clips: this.list() } satisfies LibraryFile);
+    if (this.readOnly) return;
+    try {
+      writeJsonWithBackup(this.file, { version: 1, clips: this.list() } satisfies LibraryFile);
+    } catch (e: any) {
+      // Nothing is lost yet: the data is still in memory, so tell the user and keep trying.
+      L.error('could not save library: ' + e.message);
+      this.emit('save-failed', e.message);
+      this.saveTimer = setTimeout(() => { this.saveTimer = null; this.flush(); }, RETRY_SAVE_MS);
+    }
   }
 }

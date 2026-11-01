@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { readJson, writeJsonAtomic } from './util';
+import { loadDocument, writeJsonWithBackup } from './util';
 import { REPLAY_DURATIONS, Settings } from '../shared/types';
 
 export function defaultSettings(videosDir: string): Settings {
@@ -50,13 +50,17 @@ export function sanitizeSettings(input: any, d: Settings): Settings {
 
 export class SettingsStore {
   private value: Settings;
+  readonly notice: string | null;
   constructor(private file: string, private defaults: Settings) {
-    this.value = sanitizeSettings(readJson(file, {}), defaults);
+    const doc = loadDocument<object>(file, 'settings', null, (raw) => (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null));
+    this.notice = doc.notice;
+    this.value = sanitizeSettings(doc.value ?? {}, defaults);
   }
   get(): Settings { return structuredClone(this.value); }
   set(next: unknown): Settings {
-    this.value = sanitizeSettings(next, this.defaults);
-    writeJsonAtomic(this.file, this.value);
+    const value = sanitizeSettings(next, this.defaults);
+    writeJsonWithBackup(this.file, value); // on failure the settings in effect stay unchanged
+    this.value = value;
     return this.get();
   }
 }

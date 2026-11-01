@@ -20,9 +20,51 @@ export function readJson<T>(file: string, fallback: T): T {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8')) as T;
   } catch {
-    // Fall back to a leftover temp file from an interrupted write, if any.
     return fallback;
   }
+}
+
+/** Atomic write that first keeps the previous good version as `<file>.bak`. */
+export function writeJsonWithBackup(file: string, data: unknown): void {
+  if (fs.existsSync(file)) fs.copyFileSync(file, `${file}.bak`);
+  writeJsonAtomic(file, data);
+}
+
+/** Copy a damaged file aside so it can still be inspected or repaired. Returns the copy's name. */
+export function quarantine(file: string): string | null {
+  const copy = `${file}.damaged-${Date.now()}`;
+  try { fs.copyFileSync(file, copy); return path.basename(copy); } catch { return null; }
+}
+
+export interface LoadedDocument<T> {
+  value: T | null;
+  /** Something the user should be told about; null when all is well. */
+  notice: string | null;
+  /** The file is from a newer version of the app and must not be overwritten. */
+  readOnly: boolean;
+}
+
+/**
+ * Load a versioned JSON document without ever hiding damage: a bad file is copied aside and the last
+ * good backup is used if there is one. `parse` returns null when the content isn't valid.
+ */
+export function loadDocument<T>(file: string, label: string, currentVersion: number | null, parse: (raw: any) => T | null): LoadedDocument<T> {
+  const read = (f: string): { ok: boolean; raw?: any } => {
+    try { return { ok: true, raw: JSON.parse(fs.readFileSync(f, 'utf8')) }; } catch { return { ok: false }; }
+  };
+  const fromBackup = (intro: string): LoadedDocument<T> => {
+    const bak = read(`${file}.bak`);
+    const value = bak.ok ? parse(bak.raw) : null;
+    return { value, readOnly: false, notice: value ? `${intro} Restored the last good copy; your most recent changes may be missing.` : `${intro} Starting fresh.` };
+  };
+  if (!fs.existsSync(file)) return fs.existsSync(`${file}.bak`) ? fromBackup(`Your ${label} file was missing.`) : { value: null, notice: null, readOnly: false };
+  const main = read(file);
+  if (main.ok && currentVersion !== null && typeof main.raw?.version === 'number' && main.raw.version > currentVersion)
+    return { value: null, readOnly: true, notice: `Your ${label} file comes from a newer version of ClipForge. It won't be changed, and changes made now won't be saved.` };
+  const value = main.ok ? parse(main.raw) : null;
+  if (value) return { value, notice: null, readOnly: false };
+  const copy = quarantine(file);
+  return fromBackup(`Your ${label} file was damaged${copy ? ` (a copy was kept as ${copy})` : ''}.`);
 }
 
 /** True if `child` resolves inside `parent` (both made absolute). */

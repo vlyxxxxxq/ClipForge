@@ -204,7 +204,7 @@ function clipView(c: ReturnType<LibraryStore['list']>[number]) {
 
 function registerIpc() {
   const h = (ch: string, fn: (...a: any[]) => any) => ipcMain.handle(ch, async (_e, ...a) => fn(...a));
-  h('app:info', () => ({ version: app.getVersion(), mediaError, logFile: logFilePath(), userData }));
+  h('app:info', () => ({ version: app.getVersion(), mediaError, logFile: logFilePath(), userData, dataNotices: [settings.notice, library.notice].filter(Boolean) }));
   h('settings:get', () => settings.get());
   h('settings:set', async (next: unknown) => {
     const prev = settings.get();
@@ -310,6 +310,7 @@ app.whenReady().then(async () => {
   exporter = new ExportService(paths.exportTmp);
   exporter.cleanupOrphans([settings.get().capture.clipsDir, path.join(settings.get().capture.clipsDir, 'Exports')]);
   library.on('changed', () => send('event', { type: 'library-changed', payload: null }));
+  library.on('save-failed', (msg: string) => send('event', { type: 'library-save-failed', payload: msg }));
   capture.on('status', (st: CaptureStatus) => { send('capture-status', st); updateTray(st); });
   capture.on('source-lost', (msg: string) => {
     if (Notification.isSupported()) new Notification({ title: 'Capture paused', body: msg, silent: true }).show();
