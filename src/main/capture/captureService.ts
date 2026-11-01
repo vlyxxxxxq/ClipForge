@@ -9,6 +9,7 @@ import { buildCaptureArgs, buildSaveArgs, SEGMENT_SEC, targetSize } from './capt
 import { BufferSegment, concatScript, ReplayBuffer } from './replayBuffer';
 import { ClipPath, SaveCoordinator, SavedClip } from './saveCoordinator';
 import { ffmpeg, listMonitors, probe, detectEncoders } from '../media';
+import { retentionFor } from '../hotkeys';
 import { freeDiskBytes, isInside, run, safeRemove } from '../util';
 import { log } from '../logger';
 import type { CaptureSettings, CaptureStatus, EncoderInfo, MonitorInfo, RecoveryInfo } from '../../shared/types';
@@ -16,7 +17,6 @@ import type { CaptureSettings, CaptureStatus, EncoderInfo, MonitorInfo, Recovery
 const L = log('capture');
 const LOW_DISK_WARN = 2 * 1024 ** 3;
 const LOW_DISK_STOP = 500 * 1024 ** 2;
-const RETENTION_MARGIN = 3 * SEGMENT_SEC; // keep a little extra beyond the replay duration
 const READY_TIMEOUT_MS = 20000; // ffmpeg reports progress every second once it is really capturing
 const HELPER_EXIT_TIMEOUT_MS = 2500;
 
@@ -50,7 +50,7 @@ export class CaptureService extends EventEmitter {
     fs.mkdirSync(bufferRoot, { recursive: true });
     this.status = {
       state: 'stopped', bufferedSeconds: 0, replayDuration: 60, encoder: null, encoderFallbackReason: null, fps: null,
-      droppedFrames: 0, speed: null, hotkey: 'F8', hotkeyRegistered: false, hotkeyError: null, lastError: null, warnings: [],
+      droppedFrames: 0, speed: null, hotkey: 'F8', hotkeyRegistered: false, hotkeyError: null, hotkeyWarnings: [], lastError: null, warnings: [],
       savingCount: 0, freeDiskBytes: null, audioTracks: [],
     };
     this.saves = new SaveCoordinator({
@@ -66,11 +66,11 @@ export class CaptureService extends EventEmitter {
 
   getStatus(): CaptureStatus { return { ...this.status, bufferedSeconds: Math.round(this.buffer.bufferedSeconds()) }; }
   private update(p: Partial<CaptureStatus>) { Object.assign(this.status, p); this.emit('status', this.getStatus()); }
-  setHotkeyStatus(hotkey: string, ok: boolean, err: string | null) { this.update({ hotkey, hotkeyRegistered: ok, hotkeyError: err }); }
+  setHotkeyStatus(hotkey: string, ok: boolean, err: string | null, warnings: string[]) { this.update({ hotkey, hotkeyRegistered: ok, hotkeyError: err, hotkeyWarnings: warnings }); }
 
   configure(s: CaptureSettings) {
     this.settings = s;
-    this.buffer.setRetention(s.replayDuration + RETENTION_MARGIN);
+    this.buffer.setRetention(retentionFor(s));
     this.update({ replayDuration: s.replayDuration });
   }
 
@@ -416,10 +416,10 @@ export class CaptureService extends EventEmitter {
    * Save the last N seconds. See SaveCoordinator: footage is reserved at the press, repeated presses
    * are ignored, and while recording the clip also includes the segment being written at the press.
    */
-  requestSave(clipPath: ClipPath): Promise<SavedClip | null> {
+  requestSave(clipPath: ClipPath, duration?: number): Promise<SavedClip | null> {
     const state = this.status.state;
     if (state !== 'recording' && state !== 'paused') return Promise.reject(new Error('Capture is not running.'));
-    return this.saves.request(this.settings.replayDuration, this.status.audioTracks, clipPath);
+    return this.saves.request(duration ?? this.settings.replayDuration, this.status.audioTracks, clipPath);
   }
 
   private async writeClip(segs: BufferSegment[], tracks: string[], clipPath: ClipPath): Promise<SavedClip> {

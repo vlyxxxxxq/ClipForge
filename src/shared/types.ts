@@ -8,7 +8,9 @@ export type Quality = 'low' | 'medium' | 'high' | 'ultra';
 
 export interface CaptureSettings {
   replayDuration: ReplayDuration;
-  hotkey: string; // Electron accelerator, e.g. "F8"
+  hotkey: string; // Electron accelerator, e.g. "F8"; saves the replay length above
+  durationHotkeys: Partial<Record<ReplayDuration, string>>; // optional shortcuts for a fixed length
+  screenshotHotkey: string | null;
   monitorIndex: number; // DXGI output index
   resolution: 'native' | '1440p' | '1080p' | '720p';
   fps: 30 | 60;
@@ -28,6 +30,7 @@ export interface GeneralSettings {
   closeToTray: boolean;
   notifyOnSave: boolean;
   launchMinimized: boolean;
+  saveSound: boolean;
 }
 
 export interface Settings {
@@ -49,6 +52,7 @@ export interface CaptureStatus {
   hotkey: string;
   hotkeyRegistered: boolean;
   hotkeyError: string | null;
+  hotkeyWarnings: string[]; // problems with the optional shortcuts
   lastError: string | null;
   warnings: string[];
   savingCount: number;
@@ -99,6 +103,6 @@ export interface ExportJob {
 export interface RecoveryInfo { sessionDir: string; seconds: number; segments: number }
 
 export interface AppEvent {
-  type: 'clip-saved' | 'clip-save-failed' | 'library-changed' | 'library-save-failed' | 'export' | 'capture-status' | 'toast';
+  type: 'clip-saved' | 'clip-save-failed' | 'screenshot-saved' | 'screenshot-failed' | 'library-changed' | 'library-save-failed' | 'export' | 'capture-status' | 'toast';
   payload: unknown;
 }

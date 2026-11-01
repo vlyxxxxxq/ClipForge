@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from './api';
 import { Field } from './CapturePage';
+import { playCue } from './sounds';
 import type { GeneralSettings, Settings } from '../shared/types';
 
 export function GeneralPage({ settings, onSettings }: { settings: Settings; onSettings: (s: Settings) => Promise<unknown> }) {
@@ -19,6 +20,9 @@ export function GeneralPage({ settings, onSettings }: { settings: Settings; onSe
       <section className="card-section">
         <h2>Notifications</h2>
         <Field label="Show a notification when a clip is saved"><input type="checkbox" checked={g.notifyOnSave} onChange={(e) => set({ notifyOnSave: e.target.checked })} /></Field>
+        <Field label="Play a sound when a save finishes or fails" hint="Plays through your speakers or headset, so desktop audio capture can pick it up in later clips.">
+          <div className="row"><button className="btn small" onClick={() => playCue('success')}>Test</button><input type="checkbox" checked={g.saveSound} onChange={(e) => set({ saveSound: e.target.checked })} /></div>
+        </Field>
       </section>
       <section className="card-section">
         <h2>Storage</h2>

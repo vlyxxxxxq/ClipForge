@@ -7,6 +7,7 @@ import { initMedia, probe, makeThumbnail, makeFilmstrip, extractAudioTrack } fro
 import { CaptureService } from './capture/captureService';
 import { LibraryStore } from './library/libraryStore';
 import { ExportService } from './export/exportService';
+import { HotkeyAction, planHotkeys } from './hotkeys';
 import { defaultSettings, SettingsStore } from './settings';
 import { isInside, loadDocument, safeRemove, writeJsonAtomic, uniquePath } from './util';
 import { createProject, EditProject, validateProject } from '../shared/project';
@@ -93,18 +94,32 @@ function createWindow() {
 
 // ---- hotkey -------------------------------------------------------------------------------
 
-let registeredHotkey: string | null = null;
-function registerHotkey(accel: string): { ok: boolean; error: string | null } {
-  if (registeredHotkey) { globalShortcut.unregister(registeredHotkey); registeredHotkey = null; }
+let registeredHotkeys: string[] = [];
+
+/** Re-register every shortcut. One that can't be registered is reported and doesn't affect the others. */
+function registerHotkeys(): { ok: boolean; error: string | null } {
+  for (const accel of registeredHotkeys) globalShortcut.unregister(accel);
+  registeredHotkeys = [];
+  const c = settings.get().capture;
+  const { bindings, problems } = planHotkeys(c);
   let ok = false, error: string | null = null;
-  try {
-    ok = globalShortcut.register(accel, () => saveClip());
-    if (!ok) error = `"${accel}" is already used by another application. Choose a different hotkey.`;
-  } catch (e: any) { error = `"${accel}" is not a valid shortcut.`; }
-  if (ok) registeredHotkey = accel;
-  capture.setHotkeyStatus(accel, ok, error);
-  L.info(`hotkey ${accel} registered=${ok}`);
+  for (const b of bindings) {
+    let registered = false, problem: string | null = null;
+    try {
+      registered = globalShortcut.register(b.accel, () => runHotkey(b.action));
+      if (!registered) problem = `"${b.accel}" is already used by another application. Choose a different hotkey.`;
+    } catch { problem = `"${b.accel}" is not a valid shortcut.`; }
+    if (registered) registeredHotkeys.push(b.accel);
+    if (b.accel === c.hotkey) { ok = registered; error = problem; }
+    else if (problem) problems.push(`${b.label}: ${problem}`);
+  }
+  capture.setHotkeyStatus(c.hotkey, ok, error, problems);
+  L.info(`hotkeys registered: ${registeredHotkeys.join(', ')}${problems.length ? `; ${problems.length} problem(s)` : ''}`);
   return { ok, error };
+}
+
+function runHotkey(action: HotkeyAction) {
+  if (action.type === 'save') saveClip(action.duration ?? undefined);
 }
 
 // ---- capture restarts ---------------------------------------------------------------------
@@ -127,9 +142,9 @@ function clipName(ext: string) {
   return uniquePath(settings.get().capture.clipsDir, base, ext);
 }
 
-async function saveClip() {
+async function saveClip(duration?: number) {
   try {
-    const saved = await capture.requestSave(clipName);
+    const saved = await capture.requestSave(clipName, duration);
     if (!saved) return; // repeated press ignored
     const rec = await library.addFile(saved.file, 'capture', { durationSec: saved.durationSec, audioTracks: saved.audioTracks });
     send('event', { type: 'clip-saved', payload: rec });
@@ -230,9 +245,10 @@ function registerIpc() {
     const s = settings.set(next);
     capture.configure(s.capture);
     let hotkey = { ok: true, error: null as string | null };
-    if (s.capture.hotkey !== prev.capture.hotkey) hotkey = registerHotkey(s.capture.hotkey);
-    const restartNeeded = JSON.stringify({ ...prev.capture, hotkey: 0, replayDuration: 0, clipsDir: 0, autoStartCapture: 0 }) !==
-      JSON.stringify({ ...s.capture, hotkey: 0, replayDuration: 0, clipsDir: 0, autoStartCapture: 0 });
+    const keys = (c: typeof s.capture) => JSON.stringify([c.hotkey, c.durationHotkeys, c.screenshotHotkey]);
+    if (keys(s.capture) !== keys(prev.capture)) hotkey = registerHotkeys();
+    const restartKeys = (c: typeof s.capture) => JSON.stringify({ ...c, hotkey: 0, durationHotkeys: 0, screenshotHotkey: 0, replayDuration: 0, clipsDir: 0, autoStartCapture: 0 });
+    const restartNeeded = restartKeys(prev.capture) !== restartKeys(s.capture);
     if (restartNeeded) scheduleCaptureRestart();
     return { settings: s, hotkey };
   });
@@ -247,7 +263,6 @@ function registerIpc() {
     audio: await capture.listAudioDevices().catch((e) => { L.warn(e.message); return []; }),
     encoders: await capture.getEncoders(!!refresh),
   }));
-  h('hotkey:test', (accel: string) => registerHotkey(str(accel, 40)));
   h('library:list', () => library.list().map(clipView));
   h('library:refresh', async () => { await library.verifyAll(); return library.list().map(clipView); });
   h('library:update', (id: string, patch: any) => {
@@ -344,7 +359,7 @@ app.whenReady().then(async () => {
   registerIpc();
   tray = new Tray(trayIcon('stopped'));
   tray.on('click', () => showWindow());
-  registerHotkey(settings.get().capture.hotkey);
+  registerHotkeys();
   updateTray(capture.getStatus());
   createWindow();
   library.verifyAll();

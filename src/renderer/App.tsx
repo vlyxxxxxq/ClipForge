@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { Library } from './Library';
 import { Editor } from './Editor';
 import { CapturePage } from './CapturePage';
 import { GeneralPage } from './GeneralPage';
+import { cueForEvent, playCue } from './sounds';
 import { REPLAY_DURATIONS, type CaptureStatus, type Settings } from '../shared/types';
 
 export type Page = 'library' | 'editor' | 'capture' | 'general';
@@ -19,6 +20,8 @@ export function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [dataNotices, setDataNotices] = useState<string[]>([]);
+  const soundOn = useRef(false);
+  soundOn.current = settings?.general.saveSound ?? false;
 
   const toast = useCallback((kind: Toast['kind'], text: string) => {
     const id = ++toastId;
@@ -32,6 +35,8 @@ export function App() {
     api.info().then((i) => { setMediaError(i.mediaError); setDataNotices(i.dataNotices); });
     const offS = api.onStatus(setStatus);
     const offE = api.onEvent((e) => {
+      const cue = cueForEvent(e);
+      if (cue && soundOn.current) playCue(cue);
       if (e.type === 'clip-saved') toast('ok', `Clip saved (${Math.round((e.payload as any).durationSec)}s)`);
       if (e.type === 'clip-save-failed') toast('error', `Clip not saved: ${e.payload}`);
       if (e.type === 'library-save-failed') toast('error', `Library changes couldn't be saved yet, still trying: ${e.payload}`);
@@ -125,6 +130,7 @@ function CaptureBar({ status, settings, onSettings, toast, onOpenCapture }: {
         {status.savingCount > 0 ? 'Saving…' : 'Save clip'} <kbd>{status.hotkey}</kbd>
       </button>
       {!status.hotkeyRegistered && status.hotkeyError && <span className="warn-dot" title={status.hotkeyError} aria-label={status.hotkeyError}>!</span>}
+      {status.hotkeyRegistered && status.hotkeyWarnings.length > 0 && <button className="warn-dot" title={status.hotkeyWarnings.join(' ')} aria-label={status.hotkeyWarnings.join(' ')} onClick={onOpenCapture}>!</button>}
     </header>
   );
 }

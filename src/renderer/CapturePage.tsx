@@ -43,6 +43,16 @@ export function CapturePage({ settings, status, onSettings, toast }: { settings:
         <Field label="Save clip hotkey" hint="Global shortcut, works while games have focus. If another app owns it, you'll see a warning.">
           <HotkeyInput value={c.hotkey} onChange={(hk) => set({ hotkey: hk })} />
         </Field>
+        {REPLAY_DURATIONS.map((d) => (
+          <Field key={d} label={`Save the last ${d} seconds`}>
+            <OptionalHotkey value={c.durationHotkeys[d] ?? null} onChange={(hk) => {
+              const { [d]: _old, ...rest } = c.durationHotkeys;
+              set({ durationHotkeys: hk ? { ...rest, [d]: hk } : rest });
+            }} />
+          </Field>
+        ))}
+        {status?.hotkeyWarnings.map((w) => <div key={w} className="banner warn">{w}</div>)}
+        <p className="muted small">Using a length longer than your replay length keeps more footage in the buffer, which uses more disk space.</p>
         <Field label="Clips folder">
           <div className="row"><input readOnly value={c.clipsDir} /><button className="btn" onClick={async () => { const f = await api.pickFolder(); if (f) set({ clipsDir: f }); }}>Browse…</button></div>
         </Field>
@@ -104,6 +114,10 @@ export function CapturePage({ settings, status, onSettings, toast }: { settings:
   );
 }
 
+function OptionalHotkey({ value, onChange }: { value: string | null; onChange: (v: string | null) => void }) {
+  return <div className="row"><HotkeyInput value={value} onChange={onChange} />{value && <button className="btn small" onClick={() => onChange(null)}>Clear</button>}</div>;
+}
+
 export function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="setting">
@@ -113,19 +127,19 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
   );
 }
 
-function HotkeyInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+export function HotkeyInput({ value, onChange }: { value: string | null; onChange: (v: string) => void }) {
   const [rec, setRec] = useState(false);
   const onKey = (e: React.KeyboardEvent) => {
     if (!rec) return;
     e.preventDefault();
     if (e.key === 'Escape') return setRec(false);
     if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
-    const key = e.key.length === 1 ? e.key.toUpperCase() : e.key === ' ' ? 'Space' : e.key;
+    const key = e.key.length === 1 ? e.key.toUpperCase() : e.key === ' ' ? 'Space' : e.key.replace(/^Arrow/, '');
     const mods = [e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift'].filter(Boolean);
     onChange([...mods, key].join('+'));
     setRec(false);
   };
   return <button className={`btn hotkey ${rec ? 'recording' : ''}`} onClick={() => setRec(true)} onKeyDown={onKey} onBlur={() => setRec(false)}>
-    {rec ? 'Press a key… (Esc to cancel)' : <kbd>{value}</kbd>}
+    {rec ? 'Press a key… (Esc to cancel)' : value ? <kbd>{value}</kbd> : 'Not set'}
   </button>;
 }
